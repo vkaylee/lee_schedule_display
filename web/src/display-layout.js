@@ -1,5 +1,26 @@
 export const displayBlocks = ['clock', 'branding', 'room', 'status', 'upcoming', 'footer'];
 
+export const widgetParts = {
+  clock: ['zone', 'date'],
+  branding: ['eyebrow', 'logo'],
+  room: ['eyebrow', 'accentBar'],
+  status: ['pill', 'icon', 'until', 'remaining', 'progress'],
+  upcoming: ['count', 'relative', 'duration'],
+  footer: ['badge', 'zone']
+};
+
+export const hexColorRe = /^#[a-fA-F0-9]{6}$/;
+
+export function contrastRatio(hexA, hexB) {
+  if (!hexColorRe.test(hexA || '') || !hexColorRe.test(hexB || '')) return null;
+  const lum = (hex) => {
+    const ch = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  };
+  const a = lum(hexA), b = lum(hexB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 export const defaultDisplayLayout = [
   { type: 'clock', x: 0, y: 0, w: 3, h: 1 },
   { type: 'branding', x: 3, y: 0, w: 9, h: 1 },
@@ -40,15 +61,31 @@ export function validDisplayLayout(blocks) {
   const seen = new Set();
   for (const block of blocks) {
     const custom = block?.type === 'text' || block?.type === 'rectangle';
-    const textStyleValid = block?.type !== 'text' ||
+    const optHex = (v) => v === undefined || v === '' || hexColorRe.test(v);
+    const optAlign = (v) => v === undefined || v === '' || ['left', 'center', 'right'].includes(v);
+    const optValign = (v) => v === undefined || v === '' || ['top', 'center', 'bottom'].includes(v);
+    const optPadding = (v) => v === undefined || Number.isInteger(v) && v >= 0 && v <= 128;
+    const optLs = (v) => v === undefined || Number.isInteger(v) && v >= -4 && v <= 20;
+    const widgetStyleValid = custom || (
+      optHex(block?.bgColor) && optHex(block?.textColor) && optHex(block?.accentColor) &&
+      (block?.fontScale === undefined || block.fontScale === 0 || Number.isInteger(block.fontScale) && block.fontScale >= 60 && block.fontScale <= 180) &&
+      optLs(block?.letterSpacing) && optPadding(block?.padding) &&
+      optAlign(block?.align) && optValign(block?.valign) &&
+      (block?.subLayout === undefined || block.subLayout === '' || ['default', 'reverse', 'compact'].includes(block.subLayout)) &&
+      (block?.hideParts === undefined || Array.isArray(block.hideParts) && block.hideParts.length <= 8 &&
+        new Set(block.hideParts).size === block.hideParts.length &&
+        block.hideParts.every(p => (widgetParts[block.type] || []).includes(p)))
+    );
+    const textStyleValid = block?.type !== 'text' || (
+      optHex(block.bgColor) && optHex(block.textColor) && optLs(block.letterSpacing) &&
       (block.fontSize === undefined || Number.isInteger(block.fontSize) && block.fontSize >= 8 && block.fontSize <= 256) &&
-      (block.padding === undefined || Number.isInteger(block.padding) && block.padding >= 0 && block.padding <= 128) &&
+      optPadding(block.padding) &&
       (block.margin === undefined || Number.isInteger(block.margin) && block.margin >= 0 && block.margin <= 128) &&
-      (block.align === undefined || ['left', 'center', 'right'].includes(block.align)) &&
-      (block.valign === undefined || ['top', 'center', 'bottom'].includes(block.valign));
+      optAlign(block.align) && optValign(block.valign)
+    );
     const key = block?.id || block?.type;
     if (!block || (!custom && !displayBlocks.includes(block.type)) || seen.has(key) ||
-        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) || !textStyleValid ||
+        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) || !widgetStyleValid || !textStyleValid ||
         ![block.x, block.y, block.w, block.h].every(Number.isSafeInteger) ||
         block.x < 0 || block.y < 0 || block.w < 1 || block.h < 1 ||
         block.x + block.w > 12 || block.y + block.h > 24) return false;

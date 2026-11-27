@@ -1,37 +1,129 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
   import DisplayCanvas from './DisplayCanvas.svelte';
-  import { displayBlocks, defaultDisplayLayout, validDisplayLayout } from './display-layout.js';
-  const widgetIcons = { clock:'clock', branding:'brand', room:'rooms', status:'check-circle', upcoming:'calendar', footer:'monitor' };
+  import { contrastRatio, displayBlocks, defaultDisplayLayout, validDisplayLayout, widgetParts } from './display-layout.js';
+  const widgetIcons = { clock:'clock', branding:'brand', room:'rooms', status:'check-circle', upcoming:'calendar', footer:'monitor', text:'edit', rectangle:'grid' };
+  const colorPresets = [
+    { id: 'default', vi: 'Mặc định', en: 'Default', bgColor: '', textColor: '', accentColor: '' },
+    { id: 'dark', vi: 'Đêm sâu', en: 'Midnight', bgColor: '#13211b', textColor: '#f3f7f4', accentColor: '#4ade80' },
+    { id: 'slate', vi: 'Than chì', en: 'Slate', bgColor: '#1e293b', textColor: '#f8fafc', accentColor: '#38bdf8' },
+    { id: 'emerald', vi: 'Ngọc bích', en: 'Emerald', bgColor: '#e8f5ec', textColor: '#113c26', accentColor: '#1b6340' },
+    { id: 'warm', vi: 'Vàng ấm', en: 'Warm', bgColor: '#fcf6ea', textColor: '#3b2c14', accentColor: '#b45309' },
+    { id: 'crimson', vi: 'Đỏ trầm', en: 'Crimson', bgColor: '#fdf1ef', textColor: '#5c1811', accentColor: '#b91c1c' }
+  ];
+  const partLabels = {
+    zone: ['Múi giờ', 'Timezone'],
+    date: ['Ngày tháng', 'Date'],
+    eyebrow: ['Nhãn phụ', 'Eyebrow label'],
+    logo: ['Logo / biểu tượng', 'Logo / mark'],
+    accentBar: ['Thanh màu bên', 'Accent bar'],
+    pill: ['Nhãn HIỆN TẠI', 'CURRENT pill'],
+    icon: ['Biểu tượng', 'Status icon'],
+    until: ['Giờ kết thúc / tiếp theo', 'End / next time'],
+    remaining: ['Thời gian còn lại', 'Remaining time'],
+    progress: ['Thanh tiến độ', 'Progress bar'],
+    count: ['Số lượng lịch', 'Item count'],
+    relative: ['Nhãn Kế tiếp · Sau…', 'Next countdown'],
+    duration: ['Thời lượng họp', 'Slot duration'],
+    badge: ['Trực tuyến / Ngoại tuyến', 'Live / Offline badge']
+  };
   let { device, csrf, language = 'vi', onclose } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let config = $state(null), selected = $state('room'), message = $state(null), busy = $state(false), saved = $state('');
   let width = $state(''), height = $state('');
   let zoomMode = $state('width'), zoom = $state(1);
+  let popoverOpen = $state(false), popoverPos = $state({ x: 16, y: 16 }), popoverTab = $state('style');
+  let popoverEl = $state(null);
+  let lastTrigger = null;
   let labels = $derived(language === 'en'
     ? { clock:'Clock & date', branding:'Organization', room:'Room name', status:'Status', upcoming:'Upcoming', footer:'Connection', text:'Text', rectangle:'Rectangle' }
     : { clock:'Giờ và ngày', branding:'Tổ chức', room:'Tên phòng', status:'Trạng thái', upcoming:'Lịch tiếp theo', footer:'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' });
   const key = b => b.id || b.type;
   let block = $derived(config?.blocks.find(b => key(b) === selected));
+  let contrastWarning = $derived(block && block.bgColor && block.textColor ? (contrastRatio(block.bgColor, block.textColor) ?? 21) < 4.5 : false);
   let resolutionPending = $derived(config && (String(width || '') !== String(config.width || '') || String(height || '') !== String(config.height || '')));
   let dirty = $derived(config && (resolutionPending || JSON.stringify(config) !== saved));
   const setMessage = (vi, en = '', kind = 'error') => { message = vi ? { text: [vi, en || vi], kind } : null; };
+  function cleanBlock(b, updates) {
+    const next = { ...b, ...updates };
+    for (const k of ['bgColor', 'textColor', 'accentColor', 'align', 'valign', 'subLayout']) if (!next[k]) delete next[k];
+    if (!next.fontScale || next.fontScale === 100) delete next.fontScale;
+    if (!next.letterSpacing) delete next.letterSpacing;
+    if (!next.padding && next.type !== 'text') delete next.padding;
+    if (!next.hideParts?.length) delete next.hideParts;
+    return next;
+  }
   function replace(type, updates) {
-    const blocks = config.blocks.map(b => key(b) === type ? { ...b, ...updates } : b);
+    const blocks = config.blocks.map(b => key(b) === type ? cleanBlock(b, updates) : b);
     if (validDisplayLayout(blocks) && (!config.rows || blocks.every(b => b.y + b.h <= config.rows))) { config = { ...config, blocks }; setMessage(''); } else setMessage('Vị trí hoặc kích thước không hợp lệ.', 'Invalid position or size.');
+  }
+  function togglePart(part, visible) {
+    if (!block) return;
+    const current = block.hideParts || [];
+    const hideParts = visible ? current.filter(p => p !== part) : [...new Set([...current, part])];
+    replace(selected, { hideParts });
   }
   function add(type) {
     if (config.blocks.length >= 32) { setMessage('Đã đạt giới hạn 32 lớp.', 'Maximum of 32 layers reached.'); return; }
     const id = `layer_${Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     const layer = { id, type, x:0, y:0, w:4, h:2, ...(type === 'text' ? { text: t('Văn bản', 'Text') } : { color:'#dce5db' }) };
-    config = { ...config, blocks:[...config.blocks, layer] }; selected = id; setMessage('');
+    config = { ...config, blocks:[...config.blocks, layer] }; selected = id; popoverTab = 'style'; setMessage('');
   }
   function reorder(delta) {
     const blocks = [...config.blocks], index = blocks.findIndex(b => key(b) === selected), next = index + delta;
     if (index < 0 || next < 0 || next >= blocks.length) return;
     [blocks[index], blocks[next]] = [blocks[next], blocks[index]]; config = { ...config, blocks };
+  }
+  function removeSelectedLayer() {
+    if (!block?.id) return;
+    if (!window.confirm(t('Xóa lớp này?', 'Delete this layer?'))) return;
+    config = { ...config, blocks:config.blocks.filter(b => key(b) !== selected) };
+    selected = config.blocks.length ? key(config.blocks[0]) : '';
+    popoverOpen = false;
+  }
+  async function openPopover(targetKey, point = null, triggerEl = null) {
+    selected = targetKey;
+    const targetBlock = config?.blocks.find(b => key(b) === targetKey);
+    if (!targetBlock) return;
+    if (targetBlock.type === 'text' && popoverTab === 'details') popoverTab = 'style';
+    lastTrigger = triggerEl || document.activeElement;
+    const vw = window.innerWidth || 1280, vh = window.innerHeight || 800;
+    const pw = Math.min(380, vw - 24), ph = Math.min(480, vh - 24);
+    const rawX = point?.x ?? Math.round((vw - pw) / 2);
+    const rawY = point?.y ?? Math.round((vh - ph) / 2);
+    popoverPos = {
+      x: Math.max(12, Math.min(rawX, vw - pw - 12)),
+      y: Math.max(12, Math.min(rawY, vh - ph - 12))
+    };
+    popoverOpen = true;
+    await tick();
+    if (popoverEl) {
+      const rect = popoverEl.getBoundingClientRect();
+      popoverPos = {
+        x: Math.max(12, Math.min(popoverPos.x, vw - rect.width - 12)),
+        y: Math.max(12, Math.min(popoverPos.y, vh - rect.height - 12))
+      };
+      popoverEl.focus({ preventScroll: true });
+    }
+  }
+  function closePopover(restoreFocus = false) {
+    if (!popoverOpen) return;
+    popoverOpen = false;
+    if (restoreFocus && lastTrigger && typeof lastTrigger.focus === 'function') lastTrigger.focus();
+  }
+  function handleWindowPointerDown(event) {
+    if (!popoverOpen || !popoverEl) return;
+    if (popoverEl.contains(event.target)) return;
+    if (event.target.closest?.('.block-inspect-btn, .layer-inspect-btn')) return;
+    popoverOpen = false;
+  }
+  function handleWindowKeyDown(event) {
+    if (event.key === 'Escape' && popoverOpen) {
+      event.preventDefault();
+      closePopover(true);
+    }
   }
   function move(type, x, y) { selected = type; replace(type, { x:Math.max(0,x), y:Math.max(0,y) }); }
   function applyResolution() {
@@ -41,7 +133,7 @@
     setMessage('');
   }
   function toggle(type, checked) {
-    if (!checked) { config = { ...config, blocks:config.blocks.filter(b => b.type !== type) }; if (selected === type) selected = config.blocks.length ? key(config.blocks[0]) : ''; return; }
+    if (!checked) { if (selected === type) popoverOpen = false; config = { ...config, blocks:config.blocks.filter(b => b.type !== type) }; if (selected === type) selected = config.blocks.length ? key(config.blocks[0]) : ''; return; }
     const original = defaultDisplayLayout.find(b => b.type === type);
     for (let y = 0; y <= (config.rows || 24) - original.h; y++) for (let x = 0; x <= 12 - original.w; x++) {
       const blocks = [...config.blocks, { ...original, x, y }];
@@ -68,6 +160,8 @@
   });
 </script>
 
+<svelte:window onpointerdown={handleWindowPointerDown} onkeydown={handleWindowKeyDown} />
+
 <section class="editor" aria-labelledby="editor-title">
   <header class="editor-header">
     <div>
@@ -79,7 +173,7 @@
           </span>
         {/if}
       </div>
-      <p>{t('Bản xem trước dùng dữ liệu minh họa. Kéo khối hoặc dùng các điều khiển bên dưới.', 'Preview uses sample data. Drag blocks or use the controls below.')}</p>
+      <p>{t('Bản xem trước dùng dữ liệu minh họa. Kéo khối để sắp xếp, nhấp chuột phải hoặc bấm ⚙ để chỉnh thuộc tính.', 'Preview uses sample data. Drag blocks to arrange, right-click or click ⚙ to edit properties.')}</p>
     </div>
     <button class="secondary" type="button" onclick={close}>{t('Đóng', 'Close')}</button>
   </header>
@@ -112,28 +206,10 @@
         {#if config.width}
           <p class="stage-hint">{t('Thu phóng không thay đổi bố cục đã lưu. Khi phóng lớn, cuộn ngang để xem toàn bộ chiều rộng.', 'Zoom does not affect the saved layout. When zoomed in, scroll horizontally to view full width.')}</p>
         {/if}
-        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={device.language || language} data={{room:t('Phòng họp', 'Meeting room'), entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} />
+        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={device.language || language} data={{room:t('Phòng họp', 'Meeting room'), entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} oninspect={(type, point) => openPopover(type, point)} />
       </div>
 
       <aside class="inspector">
-        <fieldset>
-          <legend>{t('Độ phân giải thiết bị (pixel)', 'Device resolution (px)')}</legend>
-          <div class="grid-2">
-            <label>{t('Chiều rộng', 'Width')} <input type="number" min="1" max="8192" step="1" bind:value={width} /></label>
-            <label>{t('Chiều cao', 'Height')} <input type="number" min="1" max="8192" step="1" bind:value={height} /></label>
-          </div>
-          <button class="secondary" type="button" onclick={applyResolution}>{t('Áp dụng độ phân giải', 'Apply resolution')}</button>
-          {#if config.rows}
-            <label>{t('Số hàng lưới', 'Grid rows')} <input type="number" min="7" max="24" value={config.rows} onchange={(e) => { const input = e.currentTarget, rows = Number(input.value); if (Number.isInteger(rows) && rows >= 7 && rows <= 24 && config.blocks.every(b => b.y + b.h <= rows)) { config = { ...config, rows }; setMessage(''); } else setMessage('Số hàng phải từ 7 đến 24 và chứa toàn bộ các khối.', 'Rows must be 7–24 and contain all blocks.'); input.value = String(config.rows); }} /></label>
-          {/if}
-        </fieldset>
-
-        <fieldset>
-          <legend>{t('Tổ chức & Thương hiệu', 'Organization & Branding')}</legend>
-          <label>{t('Tên tổ chức', 'Organization name')} <input maxlength="128" bind:value={config.organization} /></label>
-          <label>{t('Đường dẫn logo nội bộ', 'Internal logo path')} <input maxlength="256" placeholder="/logo.png" bind:value={config.logo} /></label>
-        </fieldset>
-
         <fieldset class="block-toggles">
           <legend>{t('Widget hiển thị', 'Display widgets')}</legend>
           <div class="toggle-grid">
@@ -147,58 +223,230 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <fieldset class="layer-panel">
           <legend>{t('Lớp (trên cùng hiển thị trước)', 'Layers (top shown first)')}</legend>
           <div class="grid-2">
-            <button class="secondary" type="button" onclick={() => add('text')}>{t('Thêm chữ', 'Add text')}</button>
-            <button class="secondary" type="button" onclick={() => add('rectangle')}>{t('Thêm hình chữ nhật', 'Add rectangle')}</button>
+            <button class="secondary" type="button" onclick={() => add('text')}>{t('+ Thêm chữ', '+ Add text')}</button>
+            <button class="secondary" type="button" onclick={() => add('rectangle')}>{t('+ Hình chữ nhật', '+ Rectangle')}</button>
           </div>
-          <label>{t('Chọn lớp', 'Select layer')}
-            <select bind:value={selected}>
-              {#each [...config.blocks].reverse() as b}
-                <option value={key(b)}>{labels[b.type]} {b.id ? `(${b.id.slice(-6)})` : ''}</option>
-              {/each}
-            </select>
-          </label>
-          <div class="grid-2">
-            <button class="secondary" type="button" onclick={() => reorder(1)}>{t('Đưa lên trước', 'Bring forward')}</button>
-            <button class="secondary" type="button" onclick={() => reorder(-1)}>{t('Đưa ra sau', 'Send backward')}</button>
+          <ul class="layer-list" aria-label={t('Danh sách lớp', 'Layer stack')}>
+            {#each [...config.blocks].reverse() as b (key(b))}
+              {@const k = key(b)}
+              <li class="layer-row" class:is-selected={selected === k}>
+                <button
+                  type="button"
+                  class="layer-select-btn"
+                  onclick={() => selected = k}
+                  ondblclick={(e) => openPopover(k, { x: e.clientX - 380, y: e.clientY }, e.currentTarget)}
+                >
+                  <Icon name={widgetIcons[b.type]} />
+                  <span class="layer-name">{labels[b.type]}{b.id ? ` (${b.id.slice(-4)})` : ''}</span>
+                  {#if b.bgColor || b.textColor || b.accentColor || b.hideParts?.length || b.subLayout || b.fontScale}
+                    <span class="layer-dot" title={t('Đã tùy chỉnh', 'Customized')}></span>
+                  {/if}
+                </button>
+                <button
+                  type="button"
+                  class="layer-inspect-btn"
+                  aria-label={`${t('Thuộc tính', 'Properties')}: ${labels[b.type]}`}
+                  title={t('Chỉnh thuộc tính', 'Edit properties')}
+                  onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openPopover(k, { x: r.left - 392, y: r.top }, e.currentTarget); }}
+                >⚙</button>
+              </li>
+            {/each}
+          </ul>
+          <div class="layer-bar">
+            <button class="secondary" type="button" disabled={!block} onclick={() => reorder(1)}>{t('Lên trước', 'Forward')}</button>
+            <button class="secondary" type="button" disabled={!block} onclick={() => reorder(-1)}>{t('Ra sau', 'Backward')}</button>
+            {#if block?.id}
+              <button class="danger" type="button" onclick={removeSelectedLayer}>{t('Xóa', 'Delete')}</button>
+            {/if}
           </div>
-          {#if block?.id}
-            <button class="danger" type="button" onclick={() => { if (window.confirm(t('Xóa lớp này?', 'Delete this layer?'))) { config = { ...config, blocks:config.blocks.filter(b => key(b) !== selected) }; selected = config.blocks.length ? key(config.blocks[0]) : ''; } }}>{t('Xóa lớp', 'Delete layer')}</button>
-          {/if}
         </fieldset>
 
-        {#if block}
-          <fieldset class="selected-props">
-            <legend>{t('Thuộc tính:', 'Properties:')} {labels[block.type]}</legend>
-            {#if block.type === 'text'}
-              <label>{t('Nội dung (tối đa 512 byte UTF-8)', 'Content (max 512 UTF-8 bytes)')}
-                <textarea rows="3" value={block.text || ''} oninput={(e) => { const input = e.currentTarget; if (new TextEncoder().encode(input.value).length <= 512) replace(selected, { text:input.value }); else { input.value = block.text || ''; setMessage('Nội dung vượt quá 512 byte.', 'Content exceeds 512 bytes.'); } }}></textarea>
+        <details class="sidebar-details">
+          <summary>
+            <span>{t('Độ phân giải màn hình', 'Screen resolution')}</span>
+            <span class="summary-meta mono">{config.width ? `${config.width}×${config.height}` : t('Tự động', 'Auto')}</span>
+          </summary>
+          <div class="details-body">
+            <div class="grid-2">
+              <label>{t('Chiều rộng', 'Width')} <input type="number" min="1" max="8192" step="1" bind:value={width} /></label>
+              <label>{t('Chiều cao', 'Height')} <input type="number" min="1" max="8192" step="1" bind:value={height} /></label>
+            </div>
+            <button class="secondary" type="button" onclick={applyResolution}>{t('Áp dụng độ phân giải', 'Apply resolution')}</button>
+            {#if config.rows}
+              <label>{t('Số hàng lưới', 'Grid rows')} <input type="number" min="7" max="24" value={config.rows} onchange={(e) => { const input = e.currentTarget, rows = Number(input.value); if (Number.isInteger(rows) && rows >= 7 && rows <= 24 && config.blocks.every(b => b.y + b.h <= rows)) { config = { ...config, rows }; setMessage(''); } else setMessage('Số hàng phải từ 7 đến 24 và chứa toàn bộ các khối.', 'Rows must be 7–24 and contain all blocks.'); input.value = String(config.rows); }} /></label>
+            {/if}
+          </div>
+        </details>
+
+        <details class="sidebar-details">
+          <summary>
+            <span>{t('Tổ chức & Thương hiệu', 'Organization & Brand')}</span>
+            <span class="summary-meta">{config.organization || t('Mặc định', 'Default')}</span>
+          </summary>
+          <div class="details-body">
+            <label>{t('Tên tổ chức', 'Organization name')} <input maxlength="128" bind:value={config.organization} /></label>
+            <label>{t('Đường dẫn logo nội bộ', 'Internal logo path')} <input maxlength="256" placeholder="/logo.png" bind:value={config.logo} /></label>
+          </div>
+        </details>
+
+        <div class="inspector-actions">
+          <button type="button" disabled={busy} onclick={save}>{busy ? t('Đang lưu…', 'Saving…') : t('Lưu thiết kế', 'Save layout')}</button>
+          <button class="secondary" type="button" onclick={() => { if (window.confirm(t('Thay bố cục hiện tại bằng mẫu mặc định?', 'Replace current layout with default template?'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; popoverOpen = false; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
+          <a class="public-link" href={`/display/${device.public_id}`} target="_blank" rel="noreferrer">{t('Mở màn hình công khai', 'Open public display')} ↗</a>
+        </div>
+      </aside>
+    </div>
+  {/if}
+
+  {#if popoverOpen && block}
+    <div
+      bind:this={popoverEl}
+      class="props-popover"
+      role="dialog"
+      aria-modal="false"
+      aria-label={`${t('Thuộc tính:', 'Properties:')} ${labels[block.type]}`}
+      tabindex="-1"
+      style={`left:${popoverPos.x}px;top:${popoverPos.y}px`}
+    >
+      <header class="popover-head">
+        <div class="popover-title">
+          <Icon name={widgetIcons[block.type]} />
+          <strong>{labels[block.type]}</strong>
+          {#if block.id}<span class="mono popover-id">#{block.id.slice(-4)}</span>{/if}
+        </div>
+        <div class="popover-head-actions">
+          <button type="button" class="icon-mini-btn" title={t('Đưa lên trước', 'Bring forward')} aria-label={t('Đưa lên trước', 'Bring forward')} onclick={() => reorder(1)}>↑</button>
+          <button type="button" class="icon-mini-btn" title={t('Đưa ra sau', 'Send backward')} aria-label={t('Đưa ra sau', 'Send backward')} onclick={() => reorder(-1)}>↓</button>
+          {#if block.id}
+            <button type="button" class="icon-mini-btn is-danger" title={t('Xóa lớp', 'Delete layer')} aria-label={t('Xóa lớp', 'Delete layer')} onclick={removeSelectedLayer}>🗑</button>
+          {/if}
+          <button type="button" class="icon-mini-btn" aria-label={t('Đóng thuộc tính', 'Close properties')} onclick={() => closePopover(true)}>×</button>
+        </div>
+      </header>
+
+      {#if displayBlocks.includes(block.type) || block.type === 'text'}
+        <div class="popover-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={popoverTab === 'style'} class:is-active={popoverTab === 'style'} onclick={() => popoverTab = 'style'}>
+            {block.type === 'text' ? t('Nội dung & Kiểu', 'Text & Style') : t('Kiểu dáng', 'Style')}
+          </button>
+          {#if displayBlocks.includes(block.type)}
+            <button type="button" role="tab" aria-selected={popoverTab === 'details'} class:is-active={popoverTab === 'details'} onclick={() => popoverTab = 'details'}>
+              {t('Chi tiết', 'Details')}
+            </button>
+          {/if}
+          <button type="button" role="tab" aria-selected={popoverTab === 'layout'} class:is-active={popoverTab === 'layout'} onclick={() => popoverTab = 'layout'}>
+            {t('Vị trí', 'Layout')}
+          </button>
+        </div>
+      {/if}
+
+      <div class="popover-body">
+        {#if displayBlocks.includes(block.type)}
+          {#if popoverTab === 'style'}
+            <div class="prop-group">
+              <span class="prop-label">{t('Bảng màu nhanh', 'Color presets')}</span>
+              <div class="preset-row" role="group" aria-label={t('Bảng màu nhanh', 'Color presets')}>
+                {#each colorPresets as p}
+                  <button
+                    type="button"
+                    class="preset-chip"
+                    class:is-active={(block.bgColor || '') === p.bgColor && (block.textColor || '') === p.textColor && (block.accentColor || '') === p.accentColor}
+                    onclick={() => replace(selected, { bgColor: p.bgColor, textColor: p.textColor, accentColor: p.accentColor })}
+                  >
+                    <span class="preset-swatch" style={`background:${p.bgColor || '#ffffff'};border-color:${p.accentColor || '#b8d5c2'};color:${p.textColor || '#182c23'}`}>Aa</span>
+                    <span>{t(p.vi, p.en)}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <div class="grid-3">
+              <label class="color-field">
+                <span>{t('Màu nền', 'Background')}</span>
+                <span class="color-ctrl">
+                  <input type="color" value={block.bgColor || '#ffffff'} oninput={(e) => replace(selected, { bgColor: e.currentTarget.value })} />
+                  {#if block.bgColor}<button type="button" class="clear-btn" aria-label={t('Xóa màu nền', 'Clear background')} onclick={() => replace(selected, { bgColor: '' })}>×</button>{/if}
+                </span>
               </label>
-              <div class="grid-3">
-                <label>{t('Cỡ chữ (px)', 'Font size (px)')} <input type="number" min="8" max="256" value={block.fontSize ?? 24} onchange={(e) => replace(selected, { fontSize:Number(e.currentTarget.value) })} /></label>
-                <label>Padding (px) <input type="number" min="0" max="128" value={block.padding ?? 16} onchange={(e) => replace(selected, { padding:Number(e.currentTarget.value) })} /></label>
-                <label>Margin (px) <input type="number" min="0" max="128" value={block.margin ?? 0} onchange={(e) => replace(selected, { margin:Number(e.currentTarget.value) })} /></label>
-              </div>
-              <div class="grid-2">
-                <label>{t('Căn ngang', 'Horizontal align')}
-                  <select value={block.align || 'left'} onchange={(e) => replace(selected, { align:e.currentTarget.value })}>
-                    <option value="left">{t('Trái', 'Left')}</option><option value="center">{t('Giữa', 'Center')}</option><option value="right">{t('Phải', 'Right')}</option>
-                  </select>
-                </label>
-                <label>{t('Căn dọc', 'Vertical align')}
-                  <select value={block.valign || 'center'} onchange={(e) => replace(selected, { valign:e.currentTarget.value })}>
-                    <option value="top">{t('Trên', 'Top')}</option><option value="center">{t('Giữa', 'Center')}</option><option value="bottom">{t('Dưới', 'Bottom')}</option>
-                  </select>
-                </label>
+              <label class="color-field">
+                <span>{t('Màu chữ', 'Text color')}</span>
+                <span class="color-ctrl">
+                  <input type="color" value={block.textColor || '#182c23'} oninput={(e) => replace(selected, { textColor: e.currentTarget.value })} />
+                  {#if block.textColor}<button type="button" class="clear-btn" aria-label={t('Xóa màu chữ', 'Clear text color')} onclick={() => replace(selected, { textColor: '' })}>×</button>{/if}
+                </span>
+              </label>
+              <label class="color-field">
+                <span>{t('Màu nhấn', 'Accent')}</span>
+                <span class="color-ctrl">
+                  <input type="color" value={block.accentColor || '#1b6340'} oninput={(e) => replace(selected, { accentColor: e.currentTarget.value })} />
+                  {#if block.accentColor}<button type="button" class="clear-btn" aria-label={t('Xóa màu nhấn', 'Clear accent')} onclick={() => replace(selected, { accentColor: '' })}>×</button>{/if}
+                </span>
+              </label>
+            </div>
+
+            {#if contrastWarning}
+              <p class="contrast-warn" role="status">{t('Độ tương phản chữ và nền hơi thấp — có thể khó đọc từ xa.', 'Low text/background contrast — may be hard to read at a distance.')}</p>
+            {/if}
+
+            <div class="grid-2">
+              <label>{t('Cỡ chữ (%)', 'Font scale (%)')}
+                <input type="number" min="60" max="180" step="5" value={block.fontScale || 100} onchange={(e) => replace(selected, { fontScale: Number(e.currentTarget.value) })} />
+              </label>
+              <label>{t('Dãn chữ', 'Letter spacing')}
+                <input type="number" min="-4" max="20" step="1" value={block.letterSpacing ?? 0} onchange={(e) => replace(selected, { letterSpacing: Number(e.currentTarget.value) })} />
+              </label>
+            </div>
+          {:else if popoverTab === 'details'}
+            <label>{t('Sắp xếp chi tiết', 'Detail layout')}
+              <select value={block.subLayout || ''} onchange={(e) => replace(selected, { subLayout: e.currentTarget.value })}>
+                <option value="">{t('Mặc định', 'Default')}</option>
+                <option value="reverse">{t('Đảo vị trí', 'Reversed')}</option>
+                <option value="compact">{t('Thu gọn', 'Compact')}</option>
+              </select>
+            </label>
+
+            {#if widgetParts[block.type]?.length}
+              <div class="prop-group">
+                <span class="prop-label">{t('Hiển thị chi tiết phụ', 'Visible details')}</span>
+                <div class="toggle-grid">
+                  {#each widgetParts[block.type] as part}
+                    <label class="toggle-chip">
+                      <input type="checkbox" checked={!block.hideParts?.includes(part)} onchange={(e) => togglePart(part, e.currentTarget.checked)} />
+                      <span>{t(...(partLabels[part] || [part, part]))}</span>
+                    </label>
+                  {/each}
+                </div>
               </div>
             {/if}
 
-            {#if block.type === 'rectangle'}
-              <label class="color-row">{t('Màu nền', 'Fill color')} <input type="color" value={block.color || '#dce5db'} oninput={(e) => replace(selected, { color:e.currentTarget.value })} /></label>
-            {/if}
-
+            <button type="button" class="secondary reset-widget-btn" onclick={() => replace(selected, { bgColor: '', textColor: '', accentColor: '', fontScale: 100, letterSpacing: 0, padding: 0, align: '', valign: '', subLayout: '', hideParts: [] })}>
+              {t('Đặt lại kiểu mặc định cho widget này', 'Reset style for this widget')}
+            </button>
+          {:else}
+            <div class="grid-3">
+              <label>{t('Căn ngang', 'Align')}
+                <select value={block.align || ''} onchange={(e) => replace(selected, { align: e.currentTarget.value })}>
+                  <option value="">{t('Mặc định', 'Default')}</option>
+                  <option value="left">{t('Trái', 'Left')}</option>
+                  <option value="center">{t('Giữa', 'Center')}</option>
+                  <option value="right">{t('Phải', 'Right')}</option>
+                </select>
+              </label>
+              <label>{t('Căn dọc', 'Vertical')}
+                <select value={block.valign || ''} onchange={(e) => replace(selected, { valign: e.currentTarget.value })}>
+                  <option value="">{t('Mặc định', 'Default')}</option>
+                  <option value="top">{t('Trên', 'Top')}</option>
+                  <option value="center">{t('Giữa', 'Center')}</option>
+                  <option value="bottom">{t('Dưới', 'Bottom')}</option>
+                </select>
+              </label>
+              <label>Padding (px)
+                <input type="number" min="0" max="128" step="2" value={block.padding ?? 0} onchange={(e) => replace(selected, { padding: Number(e.currentTarget.value) })} />
+              </label>
+            </div>
             <div class="coordinates">
               {#each ['x','y','w','h'] as field}
                 <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
@@ -206,15 +454,68 @@
                 </label>
               {/each}
             </div>
-          </fieldset>
+          {/if}
+        {:else if block.type === 'text'}
+          {#if popoverTab === 'style'}
+            <label>{t('Nội dung (tối đa 512 byte UTF-8)', 'Content (max 512 UTF-8 bytes)')}
+              <textarea rows="3" value={block.text || ''} oninput={(e) => { const input = e.currentTarget; if (new TextEncoder().encode(input.value).length <= 512) replace(selected, { text:input.value }); else { input.value = block.text || ''; setMessage('Nội dung vượt quá 512 byte.', 'Content exceeds 512 bytes.'); } }}></textarea>
+            </label>
+            <div class="grid-2">
+              <label class="color-field">
+                <span>{t('Màu chữ', 'Text color')}</span>
+                <span class="color-ctrl">
+                  <input type="color" value={block.textColor || '#182c23'} oninput={(e) => replace(selected, { textColor: e.currentTarget.value })} />
+                  {#if block.textColor}<button type="button" class="clear-btn" aria-label={t('Xóa màu chữ', 'Clear text color')} onclick={() => replace(selected, { textColor: '' })}>×</button>{/if}
+                </span>
+              </label>
+              <label class="color-field">
+                <span>{t('Màu nền', 'Background')}</span>
+                <span class="color-ctrl">
+                  <input type="color" value={block.bgColor || '#ffffff'} oninput={(e) => replace(selected, { bgColor: e.currentTarget.value })} />
+                  {#if block.bgColor}<button type="button" class="clear-btn" aria-label={t('Xóa màu nền', 'Clear background')} onclick={() => replace(selected, { bgColor: '' })}>×</button>{/if}
+                </span>
+              </label>
+            </div>
+            <div class="grid-2">
+              <label>{t('Cỡ chữ (px)', 'Font size (px)')} <input type="number" min="8" max="256" value={block.fontSize ?? 24} onchange={(e) => replace(selected, { fontSize:Number(e.currentTarget.value) })} /></label>
+              <label>{t('Dãn chữ', 'Letter spacing')} <input type="number" min="-4" max="20" step="1" value={block.letterSpacing ?? 0} onchange={(e) => replace(selected, { letterSpacing:Number(e.currentTarget.value) })} /></label>
+            </div>
+          {:else}
+            <div class="grid-2">
+              <label>Padding (px) <input type="number" min="0" max="128" value={block.padding ?? 16} onchange={(e) => replace(selected, { padding:Number(e.currentTarget.value) })} /></label>
+              <label>Margin (px) <input type="number" min="0" max="128" value={block.margin ?? 0} onchange={(e) => replace(selected, { margin:Number(e.currentTarget.value) })} /></label>
+            </div>
+            <div class="grid-2">
+              <label>{t('Căn ngang', 'Horizontal align')}
+                <select value={block.align || 'left'} onchange={(e) => replace(selected, { align:e.currentTarget.value })}>
+                  <option value="left">{t('Trái', 'Left')}</option><option value="center">{t('Giữa', 'Center')}</option><option value="right">{t('Phải', 'Right')}</option>
+                </select>
+              </label>
+              <label>{t('Căn dọc', 'Vertical align')}
+                <select value={block.valign || 'center'} onchange={(e) => replace(selected, { valign:e.currentTarget.value })}>
+                  <option value="top">{t('Trên', 'Top')}</option><option value="center">{t('Giữa', 'Center')}</option><option value="bottom">{t('Dưới', 'Bottom')}</option>
+                </select>
+              </label>
+            </div>
+            <div class="coordinates">
+              {#each ['x','y','w','h'] as field}
+                <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
+                  <input type="number" min={field === 'x' || field === 'y' ? 0 : 1} max={field === 'x' || field === 'w' ? 12 : 24} value={block[field]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [field]:Number(input.value) }); input.value = String(config.blocks.find(b => key(b) === selected)[field]); }} />
+                </label>
+              {/each}
+            </div>
+          {/if}
+        {:else if block.type === 'rectangle'}
+          <label class="color-row">{t('Màu nền', 'Fill color')} <input type="color" value={block.color || '#dce5db'} oninput={(e) => replace(selected, { color:e.currentTarget.value })} /></label>
+          <div class="coordinates">
+            {#each ['x','y','w','h'] as field}
+              <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
+                <input type="number" min={field === 'x' || field === 'y' ? 0 : 1} max={field === 'x' || field === 'w' ? 12 : 24} value={block[field]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [field]:Number(input.value) }); input.value = String(config.blocks.find(b => key(b) === selected)[field]); }} />
+              </label>
+            {/each}
+          </div>
         {/if}
-
-        <div class="inspector-actions">
-          <button type="button" disabled={busy} onclick={save}>{busy ? t('Đang lưu…', 'Saving…') : t('Lưu thiết kế', 'Save layout')}</button>
-          <button class="secondary" type="button" onclick={() => { if (window.confirm(t('Thay bố cục hiện tại bằng mẫu mặc định?', 'Replace current layout with default template?'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
-          <a class="public-link" href={`/display/${device.public_id}`} target="_blank" rel="noreferrer">{t('Mở màn hình công khai', 'Open public display')} ↗</a>
-        </div>
-      </aside>
+      </div>
     </div>
   {/if}
 </section>
@@ -321,8 +622,240 @@
 
   .inspector {
     display: grid;
-    gap: 0.9rem;
+    gap: 0.75rem;
     min-width: 0;
+  }
+
+  .layer-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.3rem;
+    max-height: 17rem;
+    overflow-y: auto;
+  }
+
+  .layer-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+    padding: 0.18rem;
+  }
+
+  .layer-row.is-selected {
+    border-color: var(--focus-ring, #1d5fa3);
+    background: #eef5fc;
+  }
+
+  .layer-select-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2rem !important;
+    padding: 0.25rem 0.45rem !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--ink-primary) !important;
+    font-size: 0.84rem !important;
+    font-weight: 600 !important;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+  }
+
+  .layer-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .layer-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background: var(--accent, #1b6340);
+    flex-shrink: 0;
+  }
+
+  .layer-inspect-btn {
+    min-width: 2rem !important;
+    min-height: 2rem !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-sm) !important;
+    background: var(--bg-surface) !important;
+    color: var(--ink-secondary) !important;
+    font-size: 0.85rem !important;
+    cursor: pointer;
+  }
+
+  .layer-inspect-btn:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+  }
+
+  .layer-bar {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .layer-bar button {
+    flex: 1;
+    min-height: 2.15rem;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  .sidebar-details {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+
+  .sidebar-details summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.72rem 0.95rem;
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: var(--ink-secondary);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .sidebar-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .summary-meta {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    max-width: 48%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .details-body {
+    padding: 0 0.95rem 0.9rem;
+    display: grid;
+    gap: 0.65rem;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 0.75rem;
+  }
+
+  .props-popover {
+    position: fixed;
+    z-index: 60;
+    width: min(380px, calc(100vw - 24px));
+    max-height: min(80vh, 540px);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border-strong, #b8c6bb);
+    border-radius: var(--radius-lg, 0.9rem);
+    background: var(--bg-surface, #ffffff);
+    box-shadow:
+      0 18px 42px -12px rgba(18, 36, 27, 0.28),
+      0 4px 12px -2px rgba(18, 36, 27, 0.12);
+    overflow: hidden;
+    outline: none;
+  }
+
+  .popover-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.7rem 0.85rem;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-subtle);
+  }
+
+  .popover-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    font-size: 0.92rem;
+    color: var(--ink-primary);
+  }
+
+  .popover-id {
+    font-size: 0.74rem;
+    color: var(--ink-muted);
+  }
+
+  .popover-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .icon-mini-btn {
+    min-width: 1.95rem !important;
+    min-height: 1.95rem !important;
+    padding: 0 !important;
+    border: 1px solid var(--border-subtle) !important;
+    border-radius: var(--radius-sm) !important;
+    background: var(--bg-surface) !important;
+    color: var(--ink-secondary) !important;
+    font-size: 0.88rem !important;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .icon-mini-btn:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+  }
+
+  .icon-mini-btn.is-danger:hover {
+    border-color: var(--danger, #9e2a22) !important;
+    color: var(--danger, #9e2a22) !important;
+  }
+
+  .popover-tabs {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 0.25rem;
+    padding: 0.4rem 0.65rem;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+  }
+
+  .popover-tabs button {
+    min-height: 2rem;
+    padding: 0.28rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .popover-tabs button.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent-border);
+    color: #134e31;
+  }
+
+  .popover-body {
+    padding: 0.85rem;
+    display: grid;
+    gap: 0.7rem;
+    overflow-y: auto;
   }
 
   fieldset {
@@ -348,6 +881,12 @@
     display: grid;
     gap: 0.25rem;
     min-width: 0;
+  }
+
+  .grid-2 > label,
+  .grid-3 > label {
+    grid-template-rows: 1fr auto;
+    align-items: end;
   }
 
   .grid-2 {
@@ -392,7 +931,8 @@
     justify-content: space-between;
   }
 
-  .color-row input[type='color'] {
+  .color-row input[type='color'],
+  .color-ctrl input[type='color'] {
     width: 3.5rem;
     height: 2.35rem;
     padding: 0.15rem;
@@ -400,6 +940,100 @@
     border-radius: var(--radius-sm);
     background: #ffffff;
     cursor: pointer;
+  }
+
+  .prop-group {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  .prop-label {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--ink-secondary);
+  }
+
+  .preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .preset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2.15rem;
+    padding: 0.28rem 0.55rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 9999px;
+    background: var(--bg-subtle);
+    color: var(--ink-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .preset-chip.is-active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: #134e31;
+  }
+
+  .preset-swatch {
+    display: inline-grid;
+    place-items: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 9999px;
+    border: 2px solid;
+    font-size: 0.65rem;
+    font-weight: 800;
+  }
+
+  .color-field {
+    gap: 0.3rem;
+  }
+
+  .color-ctrl {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .color-ctrl input[type='color'] {
+    width: 100%;
+    min-width: 2.6rem;
+    height: 2.2rem;
+  }
+
+  .clear-btn {
+    min-width: 2rem;
+    min-height: 2.2rem;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+    color: var(--ink-secondary);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .contrast-warn {
+    margin: 0;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid #e7c079;
+    border-radius: var(--radius-sm);
+    background: #fef8eb;
+    color: #7a4b0b;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+
+  .reset-widget-btn {
+    width: 100%;
+    font-size: 0.84rem;
   }
 
   .coordinates {
@@ -436,6 +1070,17 @@
   @media (max-width: 1080px) {
     .workspace {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .props-popover {
+      left: 0.75rem !important;
+      right: 0.75rem !important;
+      top: auto !important;
+      bottom: 0.75rem !important;
+      width: auto;
+      max-height: 75vh;
     }
   }
 

@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { canvasScale, defaultDisplayLayout, gridCell, moveBlock, resizeEdges, validDisplayLayout } from './display-layout.js';
+import { canvasScale, contrastRatio, defaultDisplayLayout, gridCell, moveBlock, resizeEdges, validDisplayLayout } from './display-layout.js';
 
 assert.equal(canvasScale(1080, 1920, 810, 700, 'width'), 0.75);
 assert.equal(canvasScale(1080, 1920, 810, 700, 'fit'), 700 / 1920);
@@ -35,3 +35,13 @@ assert.equal(validDisplayLayout([{ type: 'text', id: 'layer_t1', x: 0, y: 0, w: 
 assert.equal(validDisplayLayout([{ type: 'room', x: 0, y: 0, w: 1, h: 25 }]), false);
 assert.equal(validDisplayLayout([{ type: 'room', x: 0.5, y: 0, w: 1, h: 1 }]), false);
 assert.equal(validDisplayLayout([{ type: 'unknown', x: 0, y: 0, w: 1, h: 1 }]), false);
+assert.equal(validDisplayLayout([{ type: 'status', x: 0, y: 0, w: 6, h: 4, bgColor: '#0f172a', textColor: '#f8fafc', accentColor: '#22c55e', fontScale: 115, letterSpacing: 3, padding: 18, align: 'center', valign: 'center', subLayout: 'reverse', hideParts: ['pill', 'progress'] }]), true);
+assert.equal(validDisplayLayout([{ type: 'status', x: 0, y: 0, w: 6, h: 4, bgColor: 'invalid' }]), false);
+assert.equal(validDisplayLayout([{ type: 'status', x: 0, y: 0, w: 6, h: 4, fontScale: 50 }]), false);
+assert.equal(validDisplayLayout([{ type: 'status', x: 0, y: 0, w: 6, h: 4, letterSpacing: 25 }]), false);
+assert.equal(validDisplayLayout([{ type: 'status', x: 0, y: 0, w: 6, h: 4, subLayout: 'diagonal' }]), false);
+assert.equal(validDisplayLayout([{ type: 'clock', x: 0, y: 0, w: 3, h: 1, hideParts: ['progress'] }]), false);
+assert.equal(validDisplayLayout([{ type: 'clock', x: 0, y: 0, w: 3, h: 1, hideParts: ['zone', 'zone'] }]), false);
+assert.equal(contrastRatio('#000000', '#ffffff') > 20, true);
+assert.equal(contrastRatio('#777777', '#888888') < 2, true);
+assert.equal(contrastRatio('bad', '#ffffff'), null);

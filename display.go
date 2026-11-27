@@ -15,19 +15,26 @@ import (
 )
 
 type displayBlock struct {
-	Type     string `json:"type"`
-	X        int    `json:"x"`
-	Y        int    `json:"y"`
-	W        int    `json:"w"`
-	H        int    `json:"h"`
-	ID       string `json:"id,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Color    string `json:"color,omitempty"`
-	FontSize int    `json:"fontSize,omitempty"`
-	Padding  int    `json:"padding,omitempty"`
-	Margin   int    `json:"margin,omitempty"`
-	Align    string `json:"align,omitempty"`
-	VAlign   string `json:"valign,omitempty"`
+	Type          string   `json:"type"`
+	X             int      `json:"x"`
+	Y             int      `json:"y"`
+	W             int      `json:"w"`
+	H             int      `json:"h"`
+	ID            string   `json:"id,omitempty"`
+	Text          string   `json:"text,omitempty"`
+	Color         string   `json:"color,omitempty"`
+	BgColor       string   `json:"bgColor,omitempty"`
+	TextColor     string   `json:"textColor,omitempty"`
+	AccentColor   string   `json:"accentColor,omitempty"`
+	FontSize      int      `json:"fontSize,omitempty"`
+	FontScale     int      `json:"fontScale,omitempty"`
+	LetterSpacing int      `json:"letterSpacing,omitempty"`
+	Padding       int      `json:"padding,omitempty"`
+	Margin        int      `json:"margin,omitempty"`
+	Align         string   `json:"align,omitempty"`
+	VAlign        string   `json:"valign,omitempty"`
+	SubLayout     string   `json:"subLayout,omitempty"`
+	HideParts     []string `json:"hideParts,omitempty"`
 }
 type displayConfig struct {
 	Organization string         `json:"organization"`
@@ -44,6 +51,34 @@ func defaultDisplayConfig() displayConfig {
 
 var layerID = regexp.MustCompile(`^layer_[a-zA-Z0-9_-]{1,58}$`)
 var layerColor = regexp.MustCompile(`^#[a-fA-F0-9]{6}$`)
+
+var widgetHideParts = map[string]map[string]bool{
+	"clock":    {"zone": true, "date": true},
+	"branding": {"eyebrow": true, "logo": true},
+	"room":     {"eyebrow": true, "accentBar": true},
+	"status":   {"pill": true, "icon": true, "until": true, "remaining": true, "progress": true},
+	"upcoming": {"count": true, "relative": true, "duration": true},
+	"footer":   {"badge": true, "zone": true},
+}
+
+func validHexOpt(value string) bool {
+	return value == "" || layerColor.MatchString(value)
+}
+
+func validHideParts(widgetType string, parts []string) bool {
+	if len(parts) > 8 {
+		return false
+	}
+	allowed := widgetHideParts[widgetType]
+	seen := map[string]bool{}
+	for _, part := range parts {
+		if !allowed[part] || seen[part] {
+			return false
+		}
+		seen[part] = true
+	}
+	return true
+}
 
 func validDisplayConfig(c displayConfig) bool {
 	if len(c.Organization) > 128 || len(c.Logo) > 256 || c.Blocks == nil || len(c.Blocks) > 32 {
@@ -63,16 +98,35 @@ func validDisplayConfig(c displayConfig) bool {
 		key := a.Type
 		switch a.Type {
 		case "clock", "branding", "room", "status", "upcoming", "footer":
-			if a.ID != "" || a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" {
+			if a.ID != "" || a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Margin != 0 ||
+				!validHexOpt(a.BgColor) || !validHexOpt(a.TextColor) || !validHexOpt(a.AccentColor) ||
+				a.FontScale < 0 || a.FontScale > 180 || (a.FontScale > 0 && a.FontScale < 60) ||
+				a.LetterSpacing < -4 || a.LetterSpacing > 20 ||
+				a.Padding < 0 || a.Padding > 128 ||
+				(a.Align != "" && a.Align != "left" && a.Align != "center" && a.Align != "right") ||
+				(a.VAlign != "" && a.VAlign != "top" && a.VAlign != "center" && a.VAlign != "bottom") ||
+				(a.SubLayout != "" && a.SubLayout != "default" && a.SubLayout != "reverse" && a.SubLayout != "compact") ||
+				!validHideParts(a.Type, a.HideParts) {
 				return false
 			}
 		case "text":
-			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" || a.FontSize < 0 || a.FontSize > 256 || (a.FontSize > 0 && a.FontSize < 8) || a.Padding < 0 || a.Padding > 128 || a.Margin < 0 || a.Margin > 128 || (a.Align != "" && a.Align != "left" && a.Align != "center" && a.Align != "right") || (a.VAlign != "" && a.VAlign != "top" && a.VAlign != "center" && a.VAlign != "bottom") {
+			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" ||
+				!validHexOpt(a.BgColor) || !validHexOpt(a.TextColor) || a.AccentColor != "" ||
+				a.FontScale != 0 || a.SubLayout != "" || len(a.HideParts) > 0 ||
+				a.LetterSpacing < -4 || a.LetterSpacing > 20 ||
+				a.FontSize < 0 || a.FontSize > 256 || (a.FontSize > 0 && a.FontSize < 8) ||
+				a.Padding < 0 || a.Padding > 128 || a.Margin < 0 || a.Margin > 128 ||
+				(a.Align != "" && a.Align != "left" && a.Align != "center" && a.Align != "right") ||
+				(a.VAlign != "" && a.VAlign != "top" && a.VAlign != "center" && a.VAlign != "bottom") {
 				return false
 			}
 			key = a.ID
 		case "rectangle":
-			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" || a.FontSize != 0 || a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" {
+			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" ||
+				a.BgColor != "" || a.TextColor != "" || a.AccentColor != "" ||
+				a.FontSize != 0 || a.FontScale != 0 || a.LetterSpacing != 0 ||
+				a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" ||
+				a.SubLayout != "" || len(a.HideParts) > 0 {
 				return false
 			}
 			key = a.ID

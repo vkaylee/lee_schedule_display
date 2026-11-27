@@ -1,9 +1,9 @@
 <script>
   import Icon from './Icon.svelte';
   import { displaySchedule, formatDuration, meetingProgress } from './display-schedule.js';
-  import { canvasScale, gridCell, moveBlock, resizeEdges } from './display-layout.js';
+  import { canvasScale, gridCell, hexColorRe, moveBlock, resizeEdges } from './display-layout.js';
 
-  let { config, data, status = 'Không xác định', zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {} } = $props();
+  let { config, data, status = 'Không xác định', zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {}, oninspect = () => {} } = $props();
 
   const t = (vi, en) => language === 'en' ? en : vi;
   let locale = $derived(language === 'en' ? 'en-US' : 'vi-VN');
@@ -24,7 +24,37 @@
     : { clock: 'Giờ và ngày', branding: 'Tổ chức', room: 'Tên phòng', status: 'Trạng thái', upcoming: 'Lịch tiếp theo', footer: 'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' });
 
   const key = block => block.id || block.type;
+  const hasPart = (block, part) => !block.hideParts?.includes(part);
   const time = (seconds) => new Date(seconds * 1000).toLocaleTimeString(locale, { timeZone: zone, hour: '2-digit', minute: '2-digit' });
+  const xMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
+  const yMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
+  function blockStyle(block) {
+    const x = dragPreview?.key === key(block) ? dragPreview.x : block.x;
+    const y = dragPreview?.key === key(block) ? dragPreview.y : block.y;
+    const parts = [`grid-column:${x + 1} / span ${block.w}`, `grid-row:${y + 1} / span ${block.h}`];
+    if (block.type === 'rectangle') {
+      if (hexColorRe.test(block.color || '')) parts.push(`background:${block.color}`);
+      return parts.join(';');
+    }
+    if (hexColorRe.test(block.bgColor || '')) parts.push(`--w-bg:${block.bgColor}`);
+    if (hexColorRe.test(block.textColor || '')) parts.push(`--w-fg:${block.textColor}`);
+    if (hexColorRe.test(block.accentColor || '')) parts.push(`--w-accent:${block.accentColor}`);
+    if (Number.isInteger(block.letterSpacing)) parts.push(`--w-ls:${block.letterSpacing}`);
+    if (block.type === 'text') {
+      parts.push(`padding:${Number.isInteger(block.padding) ? block.padding : 16}px`);
+      parts.push(`margin:${Number.isInteger(block.margin) ? block.margin : 0}px`);
+      parts.push(`justify-content:${yMap[block.valign] || 'center'}`);
+      parts.push(`align-items:${xMap[block.align] || 'flex-start'}`);
+      parts.push(`text-align:${block.align || 'left'}`);
+      parts.push(`font-size:${Number.isInteger(block.fontSize) && block.fontSize >= 8 ? block.fontSize : 24}px`);
+      return parts.join(';');
+    }
+    if (Number.isInteger(block.fontScale) && block.fontScale >= 60) parts.push(`--w-font-scale:${block.fontScale / 100}`);
+    if (Number.isInteger(block.padding) && block.padding > 0) parts.push(`padding:${block.padding}px`);
+    if (block.align) { parts.push(`text-align:${block.align}`); parts.push(`--w-items-x:${xMap[block.align] || 'flex-start'}`); }
+    if (block.valign) parts.push(`--w-items-y:${yMap[block.valign] || 'center'}`);
+    return parts.join(';');
+  }
 
   function cellAt(canvas, clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -88,6 +118,13 @@
   }
   function handleKeyNudge(event, block) {
     if (!editing) return;
+    if (event.key === 'F2' || (event.key === 'Enter' && event.shiftKey)) {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      onselect(key(block));
+      oninspect(key(block), { x: rect.right, y: rect.bottom });
+      return;
+    }
     const deltas = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     const delta = deltas[event.key];
     if (!delta) return;
@@ -101,6 +138,19 @@
       onmove(key(block), moved.x, moved.y);
     }
   }
+  function openInspect(event, block) {
+    if (!editing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const k = key(block);
+    onselect(k);
+    if (event.type === 'click') {
+      const rect = event.currentTarget.getBoundingClientRect();
+      oninspect(k, { x: rect.left, y: rect.bottom + 6 });
+    } else {
+      oninspect(k, { x: event.clientX, y: event.clientY });
+    }
+  }
 </script>
 <svelte:window bind:innerHeight={windowHeight} onkeydown={(event) => { if (event.key === 'Escape' && resizeStart) { event.preventDefault(); cancelResize(); } }} onblur={cancelResize} />
 <div class="viewport" class:fixed={!!config.width} class:editing bind:clientWidth={viewportWidth}>
@@ -111,93 +161,122 @@
     {#if editing && dragPreview?.key === key(block) && (dragPreview.x !== dragging.block.x || dragPreview.y !== dragging.block.y)}<div class="drag-origin" aria-hidden="true" style={`grid-column:${dragging.block.x + 1} / span ${block.w};grid-row:${dragging.block.y + 1} / span ${block.h}`}></div>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section
-      class="block widget-{block.type} {block.type}"
+      class="block widget-{block.type} {block.type} sublayout-{block.subLayout || 'default'}"
       class:available={(block.type === 'status' || block.type === 'room') && status === 'Trống'}
       class:busy-status={(block.type === 'status' || block.type === 'room') && status === 'Đang họp'}
       class:unknown-status={(block.type === 'status' || block.type === 'room') && status === 'Không xác định'}
+      class:has-custom-bg={block.type !== 'rectangle' && hexColorRe.test(block.bgColor || '')}
+      class:has-custom-fg={block.type !== 'rectangle' && hexColorRe.test(block.textColor || '')}
+      class:has-custom-accent={block.type !== 'rectangle' && hexColorRe.test(block.accentColor || '')}
+      class:has-custom-align={block.type !== 'text' && Boolean(block.align)}
+      class:has-custom-valign={block.type !== 'text' && Boolean(block.valign)}
+      class:no-accent-bar={block.type === 'room' && !hasPart(block, 'accentBar')}
       class:is-selected={editing && selected === key(block)}
       class:drag-preview={dragPreview?.key === key(block)}
-      style={`grid-column:${(dragPreview?.key === key(block) ? dragPreview.x : block.x) + 1} / span ${block.w};grid-row:${(dragPreview?.key === key(block) ? dragPreview.y : block.y) + 1} / span ${block.h};${block.type === 'rectangle' && /^#[0-9a-f]{6}$/i.test(block.color) ? `background:${block.color}` : ''}${block.type === 'text' ? `;padding:${Number.isInteger(block.padding) ? block.padding : 16}px;margin:${Number.isInteger(block.margin) ? block.margin : 0}px;justify-content:${({ top:'flex-start', center:'center', bottom:'flex-end' })[block.valign] || 'center'};align-items:${({ left:'flex-start', center:'center', right:'flex-end' })[block.align] || 'flex-start'};text-align:${block.align || 'left'};font-size:${Number.isInteger(block.fontSize) && block.fontSize >= 8 ? block.fontSize : 24}px` : ''}`}
+      style={blockStyle(block)}
       draggable={editing}
       ondragstart={(event) => startDrag(event, block)}
       ondragend={cancelDrag}
       onpointerdown={() => { if (editing) onselect(key(block)); }}
+      oncontextmenu={(event) => openInspect(event, block)}
+      ondblclick={(event) => openInspect(event, block)}
     >
       {#if editing}
-        <button type="button" class="block-label" onkeydown={(event) => handleKeyNudge(event, block)} onclick={() => onselect(key(block))}>{labels[block.type]}</button>
+        <div class="block-actions">
+          <button type="button" class="block-label" onkeydown={(event) => handleKeyNudge(event, block)} onclick={() => onselect(key(block))}>{labels[block.type]}</button>
+          <button type="button" class="block-inspect-btn" aria-label={`${t('Thuộc tính', 'Properties')}: ${labels[block.type]}`} title={t('Nhấp phải hoặc bấm để chỉnh thuộc tính', 'Right-click or click to edit properties')} onclick={(event) => openInspect(event, block)}>⚙</button>
+        </div>
       {/if}
 
       {#if block.type === 'clock'}
         <div class="clock-head">
           <strong class="clock">{clock.toLocaleTimeString(locale, { timeZone: zone, hour:'2-digit', minute:'2-digit' })}</strong>
-          <span class="clock-zone mono">{zone}</span>
+          {#if hasPart(block, 'zone')}
+            <span class="clock-zone mono">{zone}</span>
+          {/if}
         </div>
-        <small class="clock-date">{clock.toLocaleDateString(locale, { timeZone: zone, weekday:'long', day:'numeric', month:'long', year:'numeric' })}</small>
+        {#if hasPart(block, 'date')}
+          <small class="clock-date">{clock.toLocaleDateString(locale, { timeZone: zone, weekday:'long', day:'numeric', month:'long', year:'numeric' })}</small>
+        {/if}
 
       {:else if block.type === 'branding'}
         <div class="branding-copy">
-          <span class="widget-eyebrow">{t('ĐƠN VỊ', 'ORGANIZATION')}</span>
+          {#if hasPart(block, 'eyebrow')}
+            <span class="widget-eyebrow">{t('ĐƠN VỊ', 'ORGANIZATION')}</span>
+          {/if}
           <strong>{config.organization || 'Schedule Display'}</strong>
         </div>
-        {#if config.logo}
-          <div class="branding-logo-frame">
-            <img src={config.logo} alt="Logo" />
-          </div>
-        {:else}
-          <div class="branding-mark" aria-hidden="true">
-            <Icon name="brand" />
-          </div>
+        {#if hasPart(block, 'logo')}
+          {#if config.logo}
+            <div class="branding-logo-frame">
+              <img src={config.logo} alt="Logo" />
+            </div>
+          {:else}
+            <div class="branding-mark" aria-hidden="true">
+              <Icon name="brand" />
+            </div>
+          {/if}
         {/if}
 
       {:else if block.type === 'room'}
-        <div class="room-eyebrow">
-          <Icon name="rooms" />
-          <span>{t('PHÒNG HỌP', 'MEETING ROOM')}</span>
-        </div>
+        {#if hasPart(block, 'eyebrow')}
+          <div class="room-eyebrow">
+            <Icon name="rooms" />
+            <span>{t('PHÒNG HỌP', 'MEETING ROOM')}</span>
+          </div>
+        {/if}
         <h1>{data?.room || t('Phòng họp', 'Meeting room')}</h1>
 
       {:else if block.type === 'status'}
-        <div class="status-top">
-          <span class="status-pill">
-            <span class="status-beacon" aria-hidden="true"></span>
-            <span>{t('HIỆN TẠI', 'CURRENT')}</span>
-          </span>
-        </div>
+        {#if hasPart(block, 'pill')}
+          <div class="status-top">
+            <span class="status-pill">
+              <span class="status-beacon" aria-hidden="true"></span>
+              <span>{t('HIỆN TẠI', 'CURRENT')}</span>
+            </span>
+          </div>
+        {/if}
         <div class="status-main">
-          <Icon name={status === 'Trống' ? 'check-circle' : status === 'Đang họp' ? 'clock' : 'warning'} class="widget-status-icon" />
+          {#if hasPart(block, 'icon')}
+            <Icon name={status === 'Trống' ? 'check-circle' : status === 'Đang họp' ? 'clock' : 'warning'} class="widget-status-icon" />
+          {/if}
           <strong class="state" class:available={status === 'Trống'} class:busy={status === 'Đang họp'}>{statusText}</strong>
         </div>
         {#if status !== 'Không xác định' && scheduleNow !== null}
-          {#if status === 'Đang họp' && schedule.current}
+          {#if status === 'Đang họp' && schedule.current && (hasPart(block, 'until') || hasPart(block, 'remaining') || hasPart(block, 'progress'))}
             {@const rem = formatDuration(schedule.current.ends - scheduleNow, language)}
             <div class="status-meta">
-              <div class="status-window">
-                <p class="status-until">{t('Đến', 'Until')} {time(schedule.current.ends)}</p>
-                {#if rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
-              </div>
-              <div class="status-progress" aria-hidden="true">
-                <span class="status-progress-fill" style={`width:${Math.round(progress * 100)}%`}></span>
-              </div>
+              {#if hasPart(block, 'until') || (hasPart(block, 'remaining') && rem)}
+                <div class="status-window">
+                  {#if hasPart(block, 'until')}<p class="status-until">{t('Đến', 'Until')} {time(schedule.current.ends)}</p>{/if}
+                  {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
+                </div>
+              {/if}
+              {#if hasPart(block, 'progress')}
+                <div class="status-progress" aria-hidden="true">
+                  <span class="status-progress-fill" style={`width:${Math.round(progress * 100)}%`}></span>
+                </div>
+              {/if}
             </div>
-          {:else if status === 'Trống' && schedule.upcoming.length}
+          {:else if status === 'Trống' && schedule.upcoming.length && (hasPart(block, 'until') || hasPart(block, 'remaining'))}
             {@const rem = formatDuration(schedule.upcoming[0].starts - scheduleNow, language)}
             <div class="status-meta">
               <div class="status-window">
-                <p class="status-until">{t('Trống đến', 'Free until')} {time(schedule.upcoming[0].starts)}</p>
-                {#if rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
+                {#if hasPart(block, 'until')}<p class="status-until">{t('Trống đến', 'Free until')} {time(schedule.upcoming[0].starts)}</p>{/if}
+                {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
               </div>
             </div>
-          {:else if status === 'Trống'}
+          {:else if status === 'Trống' && hasPart(block, 'until')}
             <p class="status-note">{t('Không có lịch kế tiếp', 'No upcoming meetings')}</p>
           {/if}
-        {:else if status === 'Không xác định'}
+        {:else if status === 'Không xác định' && hasPart(block, 'until')}
           <p class="status-note">{t('Đang chờ xác minh trạng thái', 'Awaiting server verification')}</p>
         {/if}
 
       {:else if block.type === 'upcoming'}
         <div class="upcoming-head">
           <span class="kicker">{t('LỊCH TIẾP THEO', 'UPCOMING')}</span>
-          {#if status !== 'Không xác định' && scheduleNow !== null && schedule.upcoming.length}
+          {#if hasPart(block, 'count') && status !== 'Không xác định' && scheduleNow !== null && schedule.upcoming.length}
             <span class="upcoming-count mono">{schedule.upcoming.length}</span>
           {/if}
         </div>
@@ -211,12 +290,12 @@
                   <span class="upcoming-dot" aria-hidden="true"></span>
                   <div>
                     <strong class="upcoming-range">{time(entry.starts)} – {time(entry.ends)}</strong>
-                    {#if index === 0}
+                    {#if index === 0 && hasPart(block, 'relative')}
                       <span class="upcoming-relative">{untilStart ? `${t('Kế tiếp', 'Next')} · ${t('Sau', 'In')} ${untilStart}` : t('Kế tiếp', 'Next')}</span>
                     {/if}
                   </div>
                 </div>
-                {#if slotDuration}<span class="upcoming-duration">{slotDuration}</span>{/if}
+                {#if slotDuration && hasPart(block, 'duration')}<span class="upcoming-duration">{slotDuration}</span>{/if}
               </li>
             {/each}
           </ul>
@@ -236,10 +315,12 @@
             <span class="footer-dot" class:is-offline={status === 'Không xác định'} aria-hidden="true"></span>
             <span>{status === 'Không xác định' ? t('Không thể xác minh kết nối', 'Connection cannot be verified') : t('Hệ thống đang hoạt động', 'System online')}</span>
           </small>
-          <span class="footer-meta">
-            <span class="footer-badge">{status === 'Không xác định' ? t('Ngoại tuyến', 'Offline') : t('Trực tuyến', 'Live')}</span>
-            <span class="footer-zone mono">{zone}</span>
-          </span>
+          {#if hasPart(block, 'badge') || hasPart(block, 'zone')}
+            <span class="footer-meta">
+              {#if hasPart(block, 'badge')}<span class="footer-badge">{status === 'Không xác định' ? t('Ngoại tuyến', 'Offline') : t('Trực tuyến', 'Live')}</span>{/if}
+              {#if hasPart(block, 'zone')}<span class="footer-zone mono">{zone}</span>{/if}
+            </span>
+          {/if}
         </div>
       {/if}
 
@@ -312,16 +393,16 @@
     padding-left: clamp(0.95rem, 2.6cqmin, 1.75rem);
   }
   .canvas.fixed .clock {
-    font-size: clamp(1.1rem, min(14cqi, 4.5cqh), 3.1rem);
+    font-size: calc(clamp(1.1rem, min(14cqi, 4.5cqh), 3.1rem) * var(--w-font-scale, 1));
   }
   .canvas.fixed .clock-date {
-    font-size: clamp(0.62rem, min(4.6cqi, 1.8cqh), 0.92rem);
+    font-size: calc(clamp(0.62rem, min(4.6cqi, 1.8cqh), 0.92rem) * var(--w-font-scale, 1));
   }
   .canvas.fixed .widget-room h1 {
-    font-size: clamp(1.05rem, min(4.4cqi, 4.4cqh), 3rem);
+    font-size: calc(clamp(1.05rem, min(4.4cqi, 4.4cqh), 3rem) * var(--w-font-scale, 1));
   }
   .canvas.fixed .state {
-    font-size: clamp(1.5rem, min(10.5cqi, 7cqh), 4.6rem);
+    font-size: calc(clamp(1.5rem, min(10.5cqi, 7cqh), 4.6rem) * var(--w-font-scale, 1));
   }
 
   .canvas {
@@ -383,7 +464,10 @@
     white-space: pre-wrap;
     overflow-wrap: break-word;
     line-height: 1.25;
-    letter-spacing: -0.01em;
+    letter-spacing: calc(-0.01em + var(--w-ls, 0) * 0.01em);
+  }
+  .block.text.has-custom-bg {
+    border-radius: 0.55rem;
   }
   .editing .block.text {
     pointer-events: auto;
@@ -399,17 +483,25 @@
     z-index: 2;
   }
 
-  .block-label {
+  .block-actions {
     position: absolute;
     top: 0.42rem;
-    right: 1.15rem;
+    right: 0.95rem;
     z-index: 4;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22rem;
+  }
+  .block-label,
+  .block-inspect-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     min-height: 0 !important;
     padding: 0.16rem 0.5rem !important;
     border: 1px solid rgba(24, 44, 35, 0.14) !important;
     border-radius: 9999px !important;
-    background: rgba(255, 254, 250, 0.88) !important;
+    background: rgba(255, 254, 250, 0.9) !important;
     backdrop-filter: blur(6px);
     color: var(--ink-secondary, #3b5448) !important;
     font-size: 0.68rem !important;
@@ -419,10 +511,22 @@
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(20, 40, 30, 0.08);
   }
+  .block-inspect-btn {
+    padding: 0.16rem 0.42rem !important;
+  }
+  .block-inspect-btn:hover {
+    background: #ffffff !important;
+    border-color: var(--accent, #1b6340) !important;
+    color: var(--accent, #1b6340) !important;
+  }
   .editing .block.is-selected .block-label {
     background: var(--focus-ring, #1d5fa3) !important;
     color: var(--ink-on-accent, #ffffff) !important;
     border-color: var(--focus-ring, #1d5fa3) !important;
+  }
+  .editing .block.is-selected .block-inspect-btn {
+    border-color: var(--focus-ring, #1d5fa3) !important;
+    color: var(--focus-ring, #1d5fa3) !important;
   }
 
   .drag-origin {
@@ -658,6 +762,7 @@
     align-items: center;
     gap: clamp(0.6rem, 2.2cqi, 1.15rem);
     min-width: 0;
+    margin-block: auto;
   }
   :global(.widget-status-icon) {
     width: clamp(1.8rem, 8.5cqi, 3.6rem) !important;
@@ -907,6 +1012,206 @@
   @container (max-width: 300px) {
     .footer-meta { display: none; }
   }
+
+  /* Custom widget overrides (colors, font scale, letter spacing, alignment, sub-layouts) */
+  .block.has-custom-bg {
+    background: var(--w-bg);
+    border-color: color-mix(in srgb, var(--w-fg, #182c23) 14%, transparent);
+  }
+  .block.has-custom-fg,
+  .block.has-custom-fg .clock,
+  .block.has-custom-fg.widget-branding strong,
+  .block.has-custom-fg.widget-room h1,
+  .block.has-custom-fg .state,
+  .block.has-custom-fg .status-until,
+  .block.has-custom-fg .upcoming-range,
+  .block.has-custom-fg .footer-row {
+    color: var(--w-fg);
+  }
+  .block.has-custom-fg .clock-date,
+  .block.has-custom-fg .room-eyebrow,
+  .block.has-custom-fg .status-note,
+  .block.has-custom-fg .kicker,
+  .block.has-custom-fg .upcoming-empty,
+  .block.has-custom-fg .upcoming-empty-box,
+  .block.has-custom-fg .footer-zone {
+    color: color-mix(in srgb, var(--w-fg) 76%, transparent);
+  }
+  .block.has-custom-fg .status-meta,
+  .block.has-custom-fg .status-note {
+    border-color: color-mix(in srgb, var(--w-fg) 16%, transparent);
+  }
+  .block.has-custom-fg .clock-zone,
+  .block.has-custom-fg .status-pill,
+  .block.has-custom-fg .status-remaining,
+  .block.has-custom-fg .upcoming-duration,
+  .block.has-custom-fg .footer-badge {
+    background: color-mix(in srgb, var(--w-fg) 10%, transparent);
+    border-color: color-mix(in srgb, var(--w-fg) 18%, transparent);
+    color: var(--w-fg);
+  }
+  .block.has-custom-fg .upcoming-item,
+  .block.has-custom-fg .upcoming-empty-box {
+    background: color-mix(in srgb, var(--w-fg) 7%, transparent);
+    border-color: color-mix(in srgb, var(--w-fg) 14%, transparent);
+  }
+  .block.has-custom-fg .upcoming-item.is-next {
+    background: color-mix(in srgb, var(--w-accent, var(--w-fg)) 13%, transparent);
+    border-color: color-mix(in srgb, var(--w-accent, var(--w-fg)) 32%, transparent);
+  }
+
+  .block.has-custom-accent .widget-eyebrow,
+  .block.has-custom-accent .room-eyebrow :global(.icon),
+  .block.has-custom-accent :global(.widget-status-icon),
+  .block.has-custom-accent .upcoming-relative {
+    color: var(--w-accent);
+  }
+  .block.has-custom-accent .branding-mark,
+  .block.has-custom-accent .upcoming-count {
+    background: color-mix(in srgb, var(--w-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--w-accent) 34%, transparent);
+    color: var(--w-accent);
+  }
+  .block.has-custom-accent.widget-room::before,
+  .block.has-custom-accent .status-progress-fill {
+    background: var(--w-accent);
+  }
+  .block.has-custom-accent .status-progress {
+    background: color-mix(in srgb, var(--w-accent) 18%, transparent);
+  }
+  .block.has-custom-accent .status-beacon,
+  .block.has-custom-accent .upcoming-item.is-next .upcoming-dot,
+  .block.has-custom-accent .footer-dot {
+    background: var(--w-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--w-accent) 26%, transparent);
+  }
+
+  /* Typography scale & letter spacing across widgets */
+  .clock {
+    font-size: calc(clamp(1.35rem, 16cqi, 3.1rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(-0.04em + var(--w-ls, 0) * 0.01em);
+  }
+  .clock-date {
+    font-size: calc(clamp(0.7rem, 4.8cqi, 0.92rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+  }
+  .widget-branding strong {
+    font-size: calc(clamp(0.95rem, 3.2cqi, 1.45rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(-0.02em + var(--w-ls, 0) * 0.01em);
+  }
+  .widget-eyebrow,
+  .room-eyebrow,
+  .kicker {
+    letter-spacing: calc(0.13em + var(--w-ls, 0) * 0.01em);
+  }
+  .widget-room h1 {
+    font-size: calc(clamp(1.25rem, 4.4cqi, 3rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(-0.03em + var(--w-ls, 0) * 0.01em);
+  }
+  .state {
+    font-size: calc(clamp(1.75rem, 10.5cqi, 4.6rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(-0.04em + var(--w-ls, 0) * 0.01em);
+  }
+  .status-until {
+    font-size: calc(clamp(0.9rem, 3.6cqi, 1.25rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+  }
+  .upcoming-range {
+    font-size: calc(clamp(0.88rem, 3.6cqi, 1.12rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+  }
+  .footer-row {
+    font-size: calc(clamp(0.75rem, 2.5cqi, 0.92rem) * var(--w-font-scale, 1));
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+  }
+
+  /* Alignment & optional accent bar */
+  .block.has-custom-align {
+    align-items: var(--w-items-x, stretch);
+  }
+  .block.has-custom-align.widget-branding {
+    justify-content: var(--w-items-x, space-between);
+  }
+  .block.has-custom-align .clock-head,
+  .block.has-custom-align .status-top,
+  .block.has-custom-align .status-main,
+  .block.has-custom-align .status-window,
+  .block.has-custom-align .upcoming-head {
+    width: 100%;
+    justify-content: var(--w-items-x, space-between);
+  }
+  .block.has-custom-align .upcoming-list,
+  .block.has-custom-align .status-meta,
+  .block.has-custom-align .footer-bar {
+    width: 100%;
+  }
+  .block.has-custom-valign {
+    justify-content: var(--w-items-y, center);
+  }
+  .widget-room.no-accent-bar {
+    padding-left: clamp(0.85rem, 1.6vw, 1.45rem);
+  }
+  .widget-room.no-accent-bar::before {
+    display: none;
+  }
+
+  /* Internal sub-layouts (rearrange details inside each widget) */
+  .widget-clock.sublayout-reverse .clock-date { order: -1; }
+  .widget-clock.sublayout-compact {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.35rem 0.75rem;
+  }
+
+  .widget-branding.sublayout-reverse { flex-direction: row-reverse; }
+  .widget-branding.sublayout-compact .branding-copy {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.6rem;
+  }
+
+  .widget-room.sublayout-reverse:not(.no-accent-bar) {
+    padding-left: clamp(0.85rem, 1.6vw, 1.45rem);
+    padding-right: clamp(1.15rem, 4cqi, 1.75rem);
+  }
+  .widget-room.sublayout-reverse::before {
+    left: auto;
+    right: 0.5rem;
+  }
+  .widget-room.sublayout-reverse h1 { order: -1; }
+  .widget-room.sublayout-compact {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .widget-status.sublayout-reverse .status-meta,
+  .widget-status.sublayout-reverse .status-note {
+    order: -1;
+    border-top: 0;
+    border-bottom: 1px solid rgba(24, 44, 35, 0.08);
+    padding-top: 0;
+    padding-bottom: 0.55rem;
+  }
+  .block.has-custom-fg.widget-status.sublayout-reverse .status-meta,
+  .block.has-custom-fg.widget-status.sublayout-reverse .status-note {
+    border-bottom-color: color-mix(in srgb, var(--w-fg) 16%, transparent);
+  }
+  .widget-status.sublayout-reverse .status-top { order: 2; }
+  .widget-status.sublayout-compact { gap: 0.4rem; }
+  .widget-status.sublayout-compact .status-meta { padding-top: 0.35rem; gap: 0.35rem; }
+
+  .widget-upcoming.sublayout-reverse .upcoming-head { order: 2; }
+  .widget-upcoming.sublayout-reverse .upcoming-item { flex-direction: row-reverse; }
+  .widget-upcoming.sublayout-compact .upcoming-list { gap: 0.35rem; }
+  .widget-upcoming.sublayout-compact .upcoming-item { padding: 0.38rem 0.6rem; }
+
+  .widget-footer.sublayout-reverse .footer-bar { flex-direction: row-reverse; }
+  .widget-footer.sublayout-compact { padding-block: 0.45rem; }
 
   @media (max-width: 600px) {
     .canvas { padding: 0.5rem; gap: 0.4rem; grid-template-rows: repeat(var(--rows), minmax(3.2rem, 1fr)); }

@@ -46,6 +46,38 @@ func TestDisplayLayerValidation(t *testing.T) {
 	}
 }
 
+func TestDisplayWidgetStyleValidation(t *testing.T) {
+	c := defaultDisplayConfig()
+	c.Blocks[0].BgColor = "#112233"
+	c.Blocks[0].TextColor = "#ffffff"
+	c.Blocks[0].AccentColor = "#22cc88"
+	c.Blocks[0].FontScale = 120
+	c.Blocks[0].LetterSpacing = 4
+	c.Blocks[0].Padding = 20
+	c.Blocks[0].Align = "center"
+	c.Blocks[0].VAlign = "top"
+	c.Blocks[0].SubLayout = "reverse"
+	c.Blocks[0].HideParts = []string{"zone"}
+	if !validDisplayConfig(c) {
+		t.Fatal("valid widget style rejected")
+	}
+	for _, invalid := range []displayBlock{
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, BgColor: "red"},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, FontScale: 59},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, FontScale: 181},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, LetterSpacing: -5},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, LetterSpacing: 21},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, SubLayout: "floating"},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, HideParts: []string{"progress"}},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, HideParts: []string{"zone", "zone"}},
+	} {
+		candidate := displayConfig{Blocks: []displayBlock{invalid}}
+		if validDisplayConfig(candidate) {
+			t.Fatalf("invalid widget style accepted: %+v", invalid)
+		}
+	}
+}
+
 func TestDisplayResolutionValidation(t *testing.T) {
 	c := defaultDisplayConfig()
 	if !validDisplayConfig(c) {
