@@ -8,9 +8,12 @@ services:
     command: ["sh", "-c", "bun install --cwd web --frozen-lockfile && exec air"]
     environment:
       DATABASE_PATH: /data/schedule.db
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      LISTEN_ADDR: 0.0.0.0:8080
+      TRUSTED_PROXY_IP: ${TRUSTED_PROXY_IP:-}
     ports:
-      # Without APP_PORT, Docker selects a free host port; find it with `docker compose port go 8080`.
-      - "127.0.0.1:${APP_PORT:-}:8080"
+      # Publish only on the host loopback interface.
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
     volumes:
       - .:/workspace
       - web_modules:/workspace/web/node_modules
