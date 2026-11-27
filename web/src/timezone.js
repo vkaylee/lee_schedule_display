@@ -1,11 +1,15 @@
 const formatters = new Map();
 function formatter(zone) {
-  if (!formatters.has(zone)) formatters.set(zone, new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+  if (!formatters.has(zone)) formatters.set(zone, new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }));
   return formatters.get(zone);
 }
 export function localTime(epoch, zone) {
   const parts = Object.fromEntries(formatter(zone).formatToParts(new Date(epoch * 1000)).map(({type,value}) => [type,value]));
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+export function localTimeSeconds(epoch, zone) {
+  const parts = Object.fromEntries(formatter(zone).formatToParts(new Date(epoch * 1000)).map(({type,value}) => [type,value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
 }
 export function instant(local, zone) {
   if (!zone || !/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;

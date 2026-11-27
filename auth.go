@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 9 {
+	if version > 11 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -91,6 +91,22 @@ PRAGMA user_version = 8`); err != nil {
 	if version <= 8 {
 		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN display_config TEXT NOT NULL DEFAULT '';
 PRAGMA user_version = 9`); err != nil {
+			return err
+		}
+	}
+	if version <= 9 {
+		if _, err := tx.Exec(`CREATE TABLE booking_series (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), rule TEXT NOT NULL, actor_id INTEGER NOT NULL REFERENCES users(id));
+CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), PRIMARY KEY(series_id, starts));
+CREATE INDEX series_occurrences_time ON series_occurrences(starts, ends);
+PRAGMA user_version = 10`); err != nil {
+			return err
+		}
+	}
+	if version <= 10 {
+		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN public_id TEXT NOT NULL DEFAULT '';
+UPDATE devices SET public_id=lower(hex(randomblob(16))) WHERE public_id='';
+CREATE UNIQUE INDEX devices_public_id ON devices(public_id) WHERE public_id<>'';
+PRAGMA user_version=11`); err != nil {
 			return err
 		}
 	}
@@ -160,7 +176,7 @@ func (l *loginLimit) allow(host string) bool {
 	return true
 }
 
-func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handler {
+func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *time.Location) http.Handler {
 	limit := &loginLimit{attempts: make(map[string][]time.Time)}
 	mux := http.NewServeMux()
 	post := func(next http.HandlerFunc) http.HandlerFunc {
@@ -346,6 +362,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 	registerUserHandlers(mux, db, post, session)
 	registerRoomHandlers(mux, db, post, session)
 	registerBookingHandlers(mux, db, post, session)
+	registerSeriesHandlers(mux, db, post, session, timezone)
 	registerDeviceHandlers(mux, db, post, session)
 	registerDisplayHandlers(mux, db, post, session)
 	return mux

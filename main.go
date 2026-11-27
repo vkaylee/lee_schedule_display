@@ -45,7 +45,7 @@ func handlerWithTimezone(db *sql.DB, origin string, trustedProxy netip.Addr, tim
 		json.NewEncoder(w).Encode(map[string]string{"timezone": timezone.String()})
 	})
 	if db != nil {
-		auth := authHandler(db, origin, trustedProxy)
+		auth := authHandler(db, origin, trustedProxy, timezone)
 		mux.Handle("/api/login", auth)
 		mux.Handle("/api/logout", auth)
 		mux.Handle("/api/session", auth)
@@ -56,6 +56,7 @@ func handlerWithTimezone(db *sql.DB, origin string, trustedProxy netip.Addr, tim
 		mux.Handle("/api/rooms/*", auth)
 		mux.Handle("/api/bookings", auth)
 		mux.Handle("/api/bookings/*", auth)
+		mux.Handle("/api/series", auth)
 		mux.Handle("/api/devices", auth)
 		mux.Handle("/api/devices/*", auth)
 		mux.Handle("/api/kiosk", auth)

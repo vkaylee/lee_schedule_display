@@ -42,6 +42,15 @@
     } catch { error = ['Không thể thu hồi thiết bị.', 'Could not revoke device.']; }
     finally { busy = false; }
   }
+  async function reactivate(device) {
+    busy = true; error = '';
+    try {
+      const response = await fetch(`/api/devices/${device.id}/reactivate`, {method:'POST',headers:{'X-CSRF-Token':csrf}});
+      if (!response.ok) throw new Error();
+      await load();
+    } catch { error = ['Không thể kích hoạt lại thiết bị.', 'Could not reactivate device.']; }
+    finally { busy = false; }
+  }
   onMount(() => {
     load();
     window.addEventListener('rooms-changed', load);
@@ -52,7 +61,7 @@
   <h2 id="device-heading">{t('Thiết bị màn hình', 'Display devices')}</h2>
   {#if error}<p role="alert">{t(...error)}</p>{/if}
   {#if token}<p role="status">{t('Mã thiết bị chỉ hiển thị một lần. Nhập mã trên màn hình phòng:', 'The device token is shown only once. Enter it on the room display:')}</p><output aria-label={t('Mã thiết bị', 'Device token')}>{token}</output><button type="button" onclick={() => token = ''}>{t('Ẩn mã', 'Hide token')}</button>{/if}
-  <ul>{#each devices as device (device.id)}<li>{device.name} — {rooms.find(r => r.id === device.room_id)?.name} — {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')} — {device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}{#if !device.revoked}<button type="button" disabled={busy || editing !== null} onclick={() => editing = device}>{t('Thiết kế màn hình', 'Design display')}</button><label>{t('Ngôn ngữ', 'Language')} {device.name} <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><button type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>{t('Thu hồi', 'Revoke')}</button>{/if}</li>{/each}</ul>
+  <ul>{#each devices as device (device.id)}<li>{device.name} — {rooms.find(r => r.id === device.room_id)?.name} — {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')} — {device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}{#if !device.revoked}<button type="button" disabled={busy || editing !== null} onclick={() => editing = device}>{t('Thiết kế màn hình', 'Design display')}</button><label>{t('Ngôn ngữ', 'Language')} {device.name} <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><button type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>{t('Thu hồi', 'Revoke')}</button><a href={`/display/${device.public_id}`} target="_blank" rel="noopener noreferrer">{t('Mở màn hình', 'Open display')}</a>{:else}<button type="button" disabled={busy} aria-label={`${t('Kích hoạt lại', 'Reactivate')} ${device.name}`} onclick={() => reactivate(device)}>{t('Kích hoạt lại', 'Reactivate')}</button>{/if}</li>{/each}</ul>
   {#if editing}<DisplayEditor device={editing} {csrf} onclose={() => editing = null} />{/if}
   <form onsubmit={create}><h3>{t('Đăng ký thiết bị', 'Register device')}</h3><label for="device-name">{t('Tên thiết bị', 'Device name')}</label><input id="device-name" bind:value={name} maxlength="128" required /><label for="device-room">{t('Phòng thiết bị', 'Device room')}</label><select id="device-room" bind:value={roomId} required><option value="">{t('Chọn phòng', 'Select room')}</option>{#each rooms.filter(r => r.active) as room}<option value={String(room.id)}>{room.name}</option>{/each}</select><button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button></form>
 </section>

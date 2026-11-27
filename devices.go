@@ -17,7 +17,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		if _, _, _, ok := session(w, r); !ok {
 			return
 		}
-		rows, err := db.Query("SELECT id,name,room_id,revoked,last_seen,language FROM devices ORDER BY id")
+		rows, err := db.Query("SELECT id,name,room_id,revoked,last_seen,language,public_id FROM devices ORDER BY id")
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -30,11 +30,12 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			Revoked  bool   `json:"revoked"`
 			LastSeen *int64 `json:"last_seen"`
 			Language string `json:"language"`
+			PublicID string `json:"public_id"`
 		}
 		devices := []device{}
 		for rows.Next() {
 			var d device
-			if rows.Scan(&d.ID, &d.Name, &d.RoomID, &d.Revoked, &d.LastSeen, &d.Language) != nil {
+			if rows.Scan(&d.ID, &d.Name, &d.RoomID, &d.Revoked, &d.LastSeen, &d.Language, &d.PublicID) != nil {
 				http.Error(w, "internal error", 500)
 				return
 			}
@@ -47,7 +48,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(devices)
 	})
-	mutate := func(create bool) http.HandlerFunc {
+	mutate := func(action string) http.HandlerFunc {
 		return post(func(w http.ResponseWriter, r *http.Request) {
 			token, _, csrf, ok := session(w, r)
 			if !ok {
@@ -61,7 +62,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			var roomID, id int64
 			var deviceToken string
 			var err error
-			if create {
+			if action == "create" {
 				var input struct {
 					Name   string `json:"name"`
 					RoomID int64  `json:"room_id"`
@@ -106,7 +107,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 				http.Error(w, "internal error", 500)
 				return
 			}
-			if create {
+			if action == "create" {
 				var active bool
 				err = tx.QueryRow("SELECT active FROM rooms WHERE id=?", roomID).Scan(&active)
 				if errors.Is(err, sql.ErrNoRows) || err == nil && !active {
@@ -114,11 +115,19 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 					return
 				}
 				if err == nil {
-					_, err = tx.Exec("INSERT INTO devices(name,room_id,token_hash) VALUES(?,?,?)", name, roomID, tokenHash(deviceToken))
+					_, err = tx.Exec("INSERT INTO devices(name,room_id,token_hash,public_id) VALUES(?,?,?,lower(hex(randomblob(16))))", name, roomID, tokenHash(deviceToken))
 				}
 			} else {
 				var result sql.Result
-				result, err = tx.Exec("UPDATE devices SET revoked=1 WHERE id=? AND revoked=0", id)
+				if action == "reactivate" {
+					// Invalidate the old kiosk credential while restoring the public display.
+					deviceToken, err = randomToken()
+					if err == nil {
+						result, err = tx.Exec("UPDATE devices SET revoked=0, token_hash=?, last_seen=NULL WHERE id=? AND revoked=1", tokenHash(deviceToken), id)
+					}
+				} else {
+					result, err = tx.Exec("UPDATE devices SET revoked=1 WHERE id=? AND revoked=0", id)
+				}
 				if err == nil {
 					n, e := result.RowsAffected()
 					err = e
@@ -135,7 +144,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 				http.Error(w, "internal error", 500)
 				return
 			}
-			if create {
+			if action == "create" {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(201)
 				json.NewEncoder(w).Encode(map[string]string{"token": deviceToken})
@@ -144,8 +153,9 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			}
 		})
 	}
-	mux.HandleFunc("POST /api/devices", mutate(true))
-	mux.HandleFunc("POST /api/devices/{id}/revoke", mutate(false))
+	mux.HandleFunc("POST /api/devices", mutate("create"))
+	mux.HandleFunc("POST /api/devices/{id}/revoke", mutate("revoke"))
+	mux.HandleFunc("POST /api/devices/{id}/reactivate", mutate("reactivate"))
 	mux.HandleFunc("PUT /api/devices/{id}/language", post(func(w http.ResponseWriter, r *http.Request) {
 		token, _, csrf, ok := session(w, r)
 		if !ok {
@@ -236,7 +246,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			http.Error(w, "internal error", 500)
 			return
 		}
-		rows, err := tx.Query("SELECT starts,ends,private,title,organizer FROM bookings WHERE room_id=? AND canceled=0 AND ends>? ORDER BY starts,id LIMIT 101", roomID, now)
+		rows, err := tx.Query("SELECT starts,ends,private,title,organizer FROM (SELECT starts,ends,private,title,organizer FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends,s.private,s.title,s.organizer FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.room_id=? AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return

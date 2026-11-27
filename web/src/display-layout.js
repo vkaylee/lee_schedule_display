@@ -14,17 +14,26 @@ export function gridCell(position, start, size, paddingStart, paddingEnd, gap, c
   return Math.floor((position - start - paddingStart) / (cell + gap));
 }
 
+export function resizeEdges(block, edges, dx, dy, rows) {
+  const left = edges.includes('w') ? Math.max(0, Math.min(block.x + block.w - 1, block.x + dx)) : block.x;
+  const right = edges.includes('e') ? Math.min(12, Math.max(block.x + 1, block.x + block.w + dx)) : block.x + block.w;
+  const top = edges.includes('n') ? Math.max(0, Math.min(block.y + block.h - 1, block.y + dy)) : block.y;
+  const bottom = edges.includes('s') ? Math.min(rows, Math.max(block.y + 1, block.y + block.h + dy)) : block.y + block.h;
+  return { x:left, y:top, w:right-left, h:bottom-top };
+}
+
 export function validDisplayLayout(blocks) {
-  if (!Array.isArray(blocks) || blocks.length > displayBlocks.length) return false;
+  if (!Array.isArray(blocks) || blocks.length > 32) return false;
   const seen = new Set();
   for (const block of blocks) {
-    if (!block || !displayBlocks.includes(block.type) || seen.has(block.type) ||
+    const custom = block?.type === 'text' || block?.type === 'rectangle';
+    const key = block?.id || block?.type;
+    if (!block || (!custom && !displayBlocks.includes(block.type)) || seen.has(key) ||
+        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) ||
         ![block.x, block.y, block.w, block.h].every(Number.isSafeInteger) ||
         block.x < 0 || block.y < 0 || block.w < 1 || block.h < 1 ||
         block.x + block.w > 12 || block.y + block.h > 24) return false;
-    seen.add(block.type);
+    seen.add(key);
   }
-  return blocks.every((a, i) => blocks.slice(i + 1).every(b =>
-    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
-  ));
+  return true;
 }

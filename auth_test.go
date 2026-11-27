@@ -29,7 +29,7 @@ func TestProxyLoginLimit(t *testing.T) {
 		{"ipv6 zone", "[2001:db8::10]:123", netip.MustParseAddr("2001:db8::10"), []string{"fe80::1%eth0"}, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := authHandler(nil, "https://example.test", tc.trusted)
+			h := authHandler(nil, "https://example.test", tc.trusted, time.UTC)
 			r := httptest.NewRequest("POST", "/api/login", strings.NewReader("{}"))
 			r.RemoteAddr = tc.remote
 			r.Header.Set("Origin", "https://example.test")
@@ -55,7 +55,7 @@ func TestProxyLoginLimit(t *testing.T) {
 		{"default", "192.0.2.10:123", netip.Addr{}, []string{"198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4", "198.51.100.5", "198.51.100.6"}, []int{400, 400, 400, 400, 400, 429}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := authHandler(nil, "https://example.test", tc.trusted)
+			h := authHandler(nil, "https://example.test", tc.trusted, time.UTC)
 			for i, client := range tc.clients {
 				r := httptest.NewRequest("POST", "/api/login", strings.NewReader("{}"))
 				r.RemoteAddr = tc.remote
@@ -143,7 +143,7 @@ func TestAuthenticationOverLocalHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, origin := range []string{"http://localhost:8080", "https://example.test"} {
-		h := authHandler(db, origin, netip.Addr{})
+		h := authHandler(db, origin, netip.Addr{}, time.UTC)
 		r := httptest.NewRequest("POST", "http://localhost:8080/api/login", strings.NewReader(`{"username":"admin","password":"long-password-123"}`))
 		r.Header.Set("Origin", origin)
 		w := httptest.NewRecorder()
@@ -188,7 +188,7 @@ func TestAuthentication(t *testing.T) {
 	if err := bootstrap(db, "other", "long-password-123"); err == nil {
 		t.Fatal("second bootstrap succeeded")
 	}
-	h := authHandler(db, "https://example.test", netip.Addr{})
+	h := authHandler(db, "https://example.test", netip.Addr{}, time.UTC)
 	request := func(method, path, body, origin string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "https://example.test"+path, strings.NewReader(body))
 		r.RemoteAddr = "192.0.2.1:1234"

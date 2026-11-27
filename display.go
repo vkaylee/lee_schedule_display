@@ -8,30 +8,43 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type displayBlock struct {
-	Type string `json:"type"`
-	X    int    `json:"x"`
-	Y    int    `json:"y"`
-	W    int    `json:"w"`
-	H    int    `json:"h"`
+	Type  string `json:"type"`
+	X     int    `json:"x"`
+	Y     int    `json:"y"`
+	W     int    `json:"w"`
+	H     int    `json:"h"`
+	ID    string `json:"id,omitempty"`
+	Text  string `json:"text,omitempty"`
+	Color string `json:"color,omitempty"`
 }
 type displayConfig struct {
 	Organization string         `json:"organization"`
 	Logo         string         `json:"logo"`
 	Blocks       []displayBlock `json:"blocks"`
+	Width        int            `json:"width,omitempty"`
+	Height       int            `json:"height,omitempty"`
+	Rows         int            `json:"rows,omitempty"`
 }
 
 func defaultDisplayConfig() displayConfig {
-	return displayConfig{Blocks: []displayBlock{{"clock", 0, 0, 3, 1}, {"branding", 3, 0, 9, 1}, {"room", 0, 1, 12, 1}, {"status", 0, 2, 7, 4}, {"upcoming", 7, 2, 5, 4}, {"footer", 0, 6, 12, 1}}}
+	return displayConfig{Blocks: []displayBlock{{Type: "clock", X: 0, Y: 0, W: 3, H: 1}, {Type: "branding", X: 3, Y: 0, W: 9, H: 1}, {Type: "room", X: 0, Y: 1, W: 12, H: 1}, {Type: "status", X: 0, Y: 2, W: 7, H: 4}, {Type: "upcoming", X: 7, Y: 2, W: 5, H: 4}, {Type: "footer", X: 0, Y: 6, W: 12, H: 1}}}
 }
 
+var layerID = regexp.MustCompile(`^layer_[a-zA-Z0-9_-]{1,58}$`)
+var layerColor = regexp.MustCompile(`^#[a-fA-F0-9]{6}$`)
+
 func validDisplayConfig(c displayConfig) bool {
-	if len(c.Organization) > 128 || len(c.Logo) > 256 || c.Blocks == nil || len(c.Blocks) > 6 {
+	if len(c.Organization) > 128 || len(c.Logo) > 256 || c.Blocks == nil || len(c.Blocks) > 32 {
+		return false
+	}
+	if (c.Width == 0) != (c.Height == 0) || c.Width < 0 || c.Height < 0 || c.Width > 8192 || c.Height > 8192 || c.Rows < 0 || c.Rows > 24 || (c.Width > 0 && c.Rows < 7) || (c.Width == 0 && c.Rows != 0) {
 		return false
 	}
 	if c.Logo != "" {
@@ -41,21 +54,30 @@ func validDisplayConfig(c displayConfig) bool {
 		}
 	}
 	seen := map[string]bool{}
-	for i, a := range c.Blocks {
+	for _, a := range c.Blocks {
+		key := a.Type
 		switch a.Type {
 		case "clock", "branding", "room", "status", "upcoming", "footer":
+			if a.ID != "" || a.Text != "" || a.Color != "" {
+				return false
+			}
+		case "text":
+			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" {
+				return false
+			}
+			key = a.ID
+		case "rectangle":
+			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" {
+				return false
+			}
+			key = a.ID
 		default:
 			return false
 		}
-		if seen[a.Type] || a.X < 0 || a.Y < 0 || a.W < 1 || a.H < 1 || a.X > 11 || a.Y > 23 || a.W > 12-a.X || a.H > 24-a.Y {
+		if seen[key] || a.X < 0 || a.Y < 0 || a.W < 1 || a.H < 1 || a.X > 11 || a.Y > 23 || a.W > 12-a.X || a.H > 24-a.Y || (c.Rows > 0 && a.H > c.Rows-a.Y) {
 			return false
 		}
-		seen[a.Type] = true
-		for _, b := range c.Blocks[:i] {
-			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
-				return false
-			}
-		}
+		seen[key] = true
 	}
 	return true
 }
@@ -160,14 +182,14 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 	}))
 	mux.HandleFunc("GET /api/display/{id}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		id, err := idOf(r)
-		if err != nil {
+		value := r.PathValue("id")
+		if len(value) != 32 || strings.Trim(value, "0123456789abcdef") != "" {
 			http.NotFound(w, r)
 			return
 		}
 		var raw, room, language string
 		var roomID int64
-		err = db.QueryRow("SELECT devices.display_config,rooms.id,rooms.name,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.id=? AND devices.revoked=0 AND rooms.active=1", id).Scan(&raw, &roomID, &room, &language)
+		err := db.QueryRow("SELECT devices.display_config,rooms.id,rooms.name,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.public_id=? AND devices.revoked=0 AND rooms.active=1", value).Scan(&raw, &roomID, &room, &language)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -182,7 +204,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		now := time.Now().Unix()
-		rows, err := db.Query("SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? ORDER BY starts,id LIMIT 101", roomID, now)
+		rows, err := db.Query("SELECT starts,ends FROM (SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.room_id=? AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return

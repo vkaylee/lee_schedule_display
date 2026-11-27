@@ -5,7 +5,7 @@
   import Devices from './Devices.svelte';
   import Kiosk from './Kiosk.svelte';
   import PublicDisplay from './PublicDisplay.svelte';
-  const displayMatch = window.location.pathname.match(/^\/display\/([1-9][0-9]*)$/);
+  const displayMatch = window.location.pathname.match(/^\/display\/([0-9a-f]{32})$/);
 
   let t;
   $: t = session?.language === 'en' ? (_vi, en) => en : (vi, _en) => vi;
