@@ -30,4 +30,4 @@
   });
 </script>
 <main><DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} />{#if error}<p role="alert">{error}</p>{/if}</main>
-<style>main{margin:0;min-height:100vh;background:#e9f2f7}p{padding:1rem;color:#7d261e}</style>
+<style>main{margin:0;min-height:100vh;background:#edefe8}p{padding:1rem;color:#7d261e}</style>

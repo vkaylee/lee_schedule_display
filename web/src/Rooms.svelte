@@ -20,7 +20,7 @@
       const response = await fetch('/api/rooms', { cache: 'no-store' });
       if (!response.ok) throw new Error();
       rooms = await response.json();
-    } catch { error = t('Không thể tải danh sách phòng.', 'Could not load rooms.'); }
+    } catch { error = ['Không thể tải danh sách phòng.', 'Could not load rooms.']; }
     finally { loading = false; }
   }
   function edit(room) {
@@ -34,7 +34,7 @@
   function clear() { editing = null; name = ''; active = true; showTitle = false; showOrganizer = false; }
   async function save(event) {
     event.preventDefault();
-    if (new TextEncoder().encode(name.trim()).length > 128) { error = t('Tên phòng không được vượt quá 128 byte UTF-8.', 'Room name must not exceed 128 UTF-8 bytes.'); return; }
+    if (new TextEncoder().encode(name.trim()).length > 128) { error = ['Tên phòng không được vượt quá 128 byte UTF-8.', 'Room name must not exceed 128 UTF-8 bytes.']; return; }
     if (editing && !active && !window.confirm(t('Vô hiệu hóa phòng này? Dữ liệu lịch sẽ được giữ lại.', 'Disable this room? Booking data will be retained.'))) return;
     busy = true; error = ''; notice = '';
     try {
@@ -42,10 +42,10 @@
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({ name: name.trim(), active, show_title: showTitle, show_organizer: showOrganizer }),
       });
-      if (response.status === 409) { error = t('Tên phòng đã tồn tại.', 'Room name already exists.'); return; }
+      if (response.status === 409) { error = ['Tên phòng đã tồn tại.', 'Room name already exists.']; return; }
       if (!response.ok) throw new Error();
-      clear(); await load(); notice = t('Đã lưu phòng.', 'Room saved.');
-    } catch { error = t('Không thể lưu phòng. Vui lòng thử lại.', 'Could not save room. Please try again.'); }
+      clear(); await load(); window.dispatchEvent(new Event('rooms-changed')); notice = ['Đã lưu phòng.', 'Room saved.'];
+    } catch { error = ['Không thể lưu phòng. Vui lòng thử lại.', 'Could not save room. Please try again.']; }
     finally { busy = false; }
   }
   onMount(load);
@@ -53,8 +53,8 @@
 
 <section aria-labelledby="rooms-heading">
   <h2 id="rooms-heading">{t('Quản lý phòng', 'Room management')}</h2>
-  {#if error}<p role="alert">{error}</p>{/if}
-  {#if notice}<p role="status">{notice}</p>{/if}
+  {#if error}<p role="alert">{t(...error)}</p>{/if}
+  {#if notice}<p role="status">{t(...notice)}</p>{/if}
   {#if loading}<p role="status">{t('Đang tải phòng…', 'Loading rooms…')}</p>
   {:else if rooms.length === 0}<p>{t('Chưa có phòng.', 'No rooms yet.')}</p>
   {:else}

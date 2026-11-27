@@ -35,7 +35,7 @@
   });
 </script>
 <section class="editor" aria-labelledby="editor-title">
-  <header><div><h3 id="editor-title">Thiết kế: {device.name}</h3><p>Kéo khối trên bản xem trước hoặc dùng điều khiển vị trí bên dưới.</p></div><button type="button" onclick={close}>Đóng</button></header>
+  <header><div><h3 id="editor-title">Thiết kế: {device.name}</h3><p>Bản xem trước dùng dữ liệu minh họa. Kéo khối hoặc dùng điều khiển vị trí bên dưới.</p></div><button type="button" onclick={close}>Đóng</button></header>
   {#if message}<p role="status">{message}</p>{/if}
   {#if config}
     <div class="workspace"><div><DisplayCanvas {config} data={{room:'Phòng họp', entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} /></div>
@@ -51,4 +51,4 @@
       </aside></div>
   {/if}
 </section>
-<style>.editor{margin-block:1.5rem;padding:1rem;border:1px solid #bfd2d9;border-radius:.5rem}header{display:flex;justify-content:space-between;gap:1rem}header h3{margin:0}.workspace{display:grid;grid-template-columns:minmax(0,3fr) minmax(15rem,1fr);gap:1rem}aside{display:grid;align-content:start;gap:.8rem}label{display:grid;gap:.25rem}fieldset label{display:block}.coordinates{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}input,select,button{font:inherit;max-width:100%}button{padding:.5rem}@media(max-width:850px){.workspace{grid-template-columns:1fr}}</style>
+<style>.editor{margin-block:1.5rem;padding:1.5rem;border:1px solid #d8e2d7;border-radius:.75rem;background:#f5f7f2}header{display:flex;align-items:start;justify-content:space-between;gap:1rem;margin-bottom:1rem}header h3{margin:0}header p{margin:.5rem 0 0}.workspace{display:grid;grid-template-columns:minmax(0,3fr) minmax(15rem,1fr);gap:1.5rem;align-items:start}.workspace>div{min-width:0;overflow:auto}aside{display:grid;align-content:start;gap:.8rem}label{display:grid;gap:.25rem}fieldset{border:1px solid #d8e2d7;border-radius:.5rem}fieldset label{display:block}.coordinates{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}input,select,button{font:inherit;max-width:100%}button{padding:.5rem}@media(max-width:850px){.workspace{grid-template-columns:1fr}.editor{padding:1rem}}</style>

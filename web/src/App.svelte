@@ -34,7 +34,7 @@
       const result = await response.json();
       if (session === currentSession) users = result;
     } catch {
-      if (session === currentSession) usersError = t('Không thể tải danh sách tài khoản. Vui lòng thử lại.', 'Could not load accounts. Please try again.');
+      if (session === currentSession) usersError = ['Không thể tải danh sách tài khoản. Vui lòng thử lại.', 'Could not load accounts. Please try again.'];
     } finally {
       if (session === currentSession) usersLoading = false;
     }
@@ -54,13 +54,13 @@
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (response.status === 409 && path.endsWith('/disable')) {
-        usersError = t('Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.', 'Cannot disable the last active account.');
+        usersError = ['Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.', 'Cannot disable the last active account.'];
         return false;
       }
       if (response.status !== 201 && response.status !== 204) throw new Error();
       return true;
     } catch {
-      usersError = t('Không thể thực hiện thao tác. Vui lòng thử lại.', 'Could not complete the operation. Please try again.');
+      usersError = ['Không thể thực hiện thao tác. Vui lòng thử lại.', 'Could not complete the operation. Please try again.'];
       return false;
     } finally {
       busy = false;
@@ -73,7 +73,7 @@
     if (await updateUser('/api/users', { username: newUsername.trim(), password: newPassword })) {
       newUsername = '';
       newPassword = '';
-      notice = t('Đã tạo tài khoản.', 'Account created.');
+      notice = ['Đã tạo tài khoản.', 'Account created.'];
       await loadUsers();
     }
   }
@@ -86,7 +86,7 @@
         return;
       }
       if (resetUser?.id === user.id) cancelReset();
-      notice = t('Đã vô hiệu hóa tài khoản.', 'Account disabled.');
+      notice = ['Đã vô hiệu hóa tài khoản.', 'Account disabled.'];
       await loadUsers();
     }
   }
@@ -105,7 +105,7 @@
         return;
       }
       cancelReset();
-      notice = t('Đã đặt lại mật khẩu.', 'Password reset.');
+      notice = ['Đã đặt lại mật khẩu.', 'Password reset.'];
     }
   }
 
@@ -118,9 +118,9 @@
         session = await response.json();
         await loadUsers();
       }
-      else if (response.status !== 401) error = t('Không thể kiểm tra phiên đăng nhập. Vui lòng thử lại.', 'Could not check your session. Please try again.');
+      else if (response.status !== 401) error = ['Không thể kiểm tra phiên đăng nhập. Vui lòng thử lại.', 'Could not check your session. Please try again.'];
     } catch {
-      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
+      error = ['Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.'];
     } finally {
       loading = false;
     }
@@ -141,14 +141,14 @@
         password = '';
         await loadUsers();
       } else if (response.status === 401) {
-        error = t('Tên đăng nhập hoặc mật khẩu không đúng.', 'Invalid username or password.');
+        error = ['Tên đăng nhập hoặc mật khẩu không đúng.', 'Invalid username or password.'];
       } else if (response.status === 429) {
-        error = t('Quá nhiều lần đăng nhập. Vui lòng thử lại sau.', 'Too many login attempts. Please try again later.');
+        error = ['Quá nhiều lần đăng nhập. Vui lòng thử lại sau.', 'Too many login attempts. Please try again later.'];
       } else {
-        error = t('Không thể đăng nhập. Vui lòng thử lại.', 'Could not log in. Please try again.');
+        error = ['Không thể đăng nhập. Vui lòng thử lại.', 'Could not log in. Please try again.'];
       }
     } catch {
-      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
+      error = ['Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.'];
     } finally {
       busy = false;
     }
@@ -169,7 +169,7 @@
       session = { ...session, language };
     } catch {
       select.value = session.language;
-      error = session.language === 'en' ? 'Could not save language. Please try again.' : 'Không thể lưu ngôn ngữ. Vui lòng thử lại.';
+      error = ['Không thể lưu ngôn ngữ. Vui lòng thử lại.', 'Could not save language. Please try again.'];
     } finally { busy = false; }
   }
 
@@ -192,10 +192,10 @@
         username = '';
         password = '';
       } else {
-        error = t('Không thể đăng xuất. Vui lòng thử lại.', 'Could not log out. Please try again.');
+        error = ['Không thể đăng xuất. Vui lòng thử lại.', 'Could not log out. Please try again.'];
       }
     } catch {
-      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
+      error = ['Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.'];
     } finally {
       busy = false;
     }
@@ -212,28 +212,33 @@
   <PublicDisplay id={displayMatch[1]} />
 {:else}
 <main>
-  <div class="panel">
-    <p class="eyebrow">SCHEDULE DISPLAY</p>
+  <div class:dashboard={session} class="panel">
+    <p class="eyebrow">SCHEDULE DISPLAY <span class="eyebrow-line"></span> {session ? t('KHÔNG GIAN LÀM VIỆC', 'WORKSPACE') : ''}</p>
     {#if loading}
       <h1>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</h1>
       <p role="status">{t('Đang kiểm tra phiên đăng nhập…', 'Checking session…')}</p>
     {:else if session}
-      <h1>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</h1>
-      <p>{t('Đã đăng nhập:', 'Signed in:')} <strong>{session.username}</strong></p>
-      {#if error}<p class="error" role="alert">{error}</p>{/if}
+      <header class="workspace-header">
+        <div><p class="section-kicker">{t('QUẢN LÝ KHÔNG GIAN', 'SPACE MANAGEMENT')}</p><h1>{t('Lịch phòng họp', 'Meeting rooms')}</h1><p class="intro">{t('Mọi cuộc họp, mọi không gian — trong tầm tay.', 'Your meetings and spaces, all in one place.')}</p></div>
+        <div class="account-bar"><span class="account-name">{session.username}</span>
+      {#if error}<p class="error" role="alert">{t(...error)}</p>{/if}
       <label for="account-language">Ngôn ngữ / Language</label>
       <select id="account-language" value={session.language} onchange={changeLanguage} disabled={busy}>
         <option value="vi">Tiếng Việt</option><option value="en">English</option>
       </select>
-      <button type="button" onclick={logout} disabled={busy}>{t('Đăng xuất', 'Log out')}</button>
+      <button class="secondary logout" type="button" onclick={logout} disabled={busy}>{t('Đăng xuất', 'Log out')}</button></div></header>
+      <nav class="workspace-nav" aria-label={t('Điều hướng quản trị', 'Workspace navigation')}>
+        <a href="#rooms-heading">{t('Phòng', 'Rooms')}</a><a href="#bookings-heading">{t('Lịch phòng', 'Bookings')}</a><a href="#device-heading">{t('Thiết bị', 'Devices')}</a><a href="#users-heading">{t('Tài khoản', 'Accounts')}</a>
+      </nav>
+      <div class="workspace-content">
       <Rooms csrf={session.csrf_token} language={session.language} />
       <Bookings csrf={session.csrf_token} language={session.language} />
       <Devices csrf={session.csrf_token} language={session.language} />
       <section aria-labelledby="users-heading">
         <h2 id="users-heading">{t('Quản lý tài khoản', 'Account management')}</h2>
         <p>{t('Quản lý quyền truy cập và mật khẩu đăng nhập.', 'Manage access and login passwords.')}</p>
-        {#if usersError}<p class="error" role="alert">{usersError}</p>{/if}
-        {#if notice}<p class="notice" role="status">{notice}</p>{/if}
+        {#if usersError}<p class="error" role="alert">{t(...usersError)}</p>{/if}
+        {#if notice}<p class="notice" role="status">{t(...notice)}</p>{/if}
         <h3>{t('Danh sách tài khoản', 'Accounts')}</h3>
         {#if usersLoading}
           <p role="status">{t('Đang tải danh sách tài khoản…', 'Loading accounts…')}</p>
@@ -276,10 +281,11 @@
           <button type="submit" disabled={busy}>{t('Tạo tài khoản', 'Create account')}</button>
         </form>
       </section>
+      </div>
     {:else}
       <h1>{t('Đăng nhập quản trị', 'Administrator login')}</h1>
       <p>{t('Đăng nhập để quản lý lịch phòng họp.', 'Sign in to manage room schedules.')}</p>
-      {#if error}<p class="error" role="alert">{error}</p>{/if}
+      {#if error}<p class="error" role="alert">{t(...error)}</p>{/if}
       <form onsubmit={login}>
         <label for="username">{t('Tên đăng nhập', 'Username')}</label>
         <input id="username" name="username" autocomplete="username" bind:value={username} required maxlength="128" />
@@ -319,4 +325,60 @@
   .actions .secondary { margin-top: 0; }
   button.danger { background: white; color: #7d261e; border-color: #a63428; }
   .notice { padding: 0.75rem; border-left: 0.25rem solid #237a54; background: #edf7ef; color: #155c3f; }
+
+  :global(body) { color: #253a33; background: #f4f3ee; }
+  main:has(.dashboard) { display: block; padding: 0; }
+  .dashboard { width: 100%; min-height: 100vh; padding: 0; border: 0; background: transparent; }
+  .dashboard > .eyebrow { display: flex; align-items: center; gap: 1rem; margin: 0; padding: 1.15rem max(2rem, calc((100% - 76rem) / 2)); background: #203e32; color: #e9f0e8; letter-spacing: .12em; }
+  .eyebrow-line { width: 1.5rem; height: 1px; background: #92a99b; }
+  .workspace-header, .workspace-nav, .workspace-content { width: min(100% - 4rem, 76rem); margin-inline: auto; }
+  .workspace-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.5rem; padding-block: 3.2rem 2rem; }
+  .section-kicker { margin: 0 0 .6rem; font-size: .72rem; font-weight: 700; letter-spacing: .13em; color: #557365; }
+  .workspace-header h1 { font-size: clamp(2rem, 3.5vw, 3.1rem); letter-spacing: -.035em; color: #213b30; }
+  .intro { margin: .6rem 0 0; color: #5a7065; }
+  .account-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; font-size: .85rem; }
+  .account-name { font-weight: 700; color: #284a39; }
+  .account-bar label { font-weight: 500; }
+  .account-bar .logout { margin: 0; }
+  .workspace-nav { display: flex; gap: .25rem; overflow-x: auto; border-bottom: 1px solid #d6ded4; }
+  .workspace-nav a { color: #4c6558; text-decoration: none; white-space: nowrap; padding: .95rem 1.2rem; font-weight: 650; border-bottom: 3px solid transparent; }
+  .workspace-nav a:hover, .workspace-nav a:focus-visible { color: #185739; border-bottom-color: #397758; }
+  .workspace-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: start; padding-block: 1.5rem 4rem; }
+  .workspace-content :global(section[aria-labelledby]) { min-width: 0; margin: 0; padding: 1.75rem; border: 1px solid #e0e5dc; border-radius: .85rem; background: #fffefa; box-shadow: 0 6px 24px #304b3b0b; scroll-margin-top: 1rem; }
+  .workspace-content :global(section[aria-labelledby='device-heading']) { grid-column: 1 / -1; }
+  .workspace-content :global(h2) { margin: 0 0 .75rem; color: #263f33; font-size: 1.3rem; letter-spacing: -.02em; }
+  .workspace-content :global(h3) { margin: 1rem 0 .45rem; color: #30483a; font-size: 1rem; }
+  .workspace-content :global(p) { color: #52695c; }
+  .workspace-content :global(form) { display: grid; gap: .55rem; margin-top: 1.5rem; padding: 1.2rem; border-radius: .6rem; background: #f6f7f2; }
+  .workspace-content :global(label) { line-height: 1.5; color: #425c4e; font-size: .9rem; font-weight: 600; }
+  .workspace-content :global(input:not([type='checkbox'])), .workspace-content :global(select), .account-bar select { width: 100%; min-height: 2.75rem; margin: 0; padding: .6rem .75rem; border: 1px solid #c4d0c3; border-radius: .4rem; background: white; color: #263f33; font: inherit; }
+  .account-bar select { width: auto; }
+  .workspace-content :global(input[type='checkbox']) { accent-color: #286c49; width: 1rem; height: 1rem; vertical-align: middle; }
+  .workspace-content :global(button) { min-height: 2.75rem; padding: .65rem 1rem; border: 1px solid #286c49; border-radius: .4rem; background: #286c49; color: white; font: inherit; font-weight: 650; cursor: pointer; }
+  .workspace-content :global(button:hover:not(:disabled)) { background: #1e563a; }
+  .workspace-content :global(button:disabled) { opacity: .55; cursor: not-allowed; }
+  .workspace-content :global(ul) { padding: 0; list-style: none; }
+  .workspace-content :global(li) { overflow-wrap: anywhere; padding: .8rem 0; border-bottom: 1px solid #e5eae2; }
+  .workspace-content :global([role='alert']) { color: #8b3027; }
+  .workspace-content :global([role='status']) { color: #225c3e; }
+  .workspace-content .actions button.secondary, .workspace-content button.danger { background: transparent; }
+  .workspace-content .actions button.secondary { color: #155c3f; }
+  .workspace-content button.danger { color: #7d261e; border-color: #a63428; }
+  .workspace-content .actions button.secondary:hover:not(:disabled) { background: #edf4ed; }
+  .workspace-content button.danger:hover:not(:disabled) { background: #fff1ef; }
+  .panel:not(.dashboard) { border: 1px solid #e0e5dc; border-top: .3rem solid #286c49; border-radius: .75rem; background: #fffefa; box-shadow: 0 12px 40px #304b3b12; }
+  .panel:not(.dashboard) .eyebrow { color: #557365; }
+  .panel:not(.dashboard) h1 { color: #213b30; letter-spacing: -.025em; }
+  .panel:not(.dashboard) input { min-height: 2.75rem; border-color: #c4d0c3; border-radius: .4rem; }
+  .panel:not(.dashboard) button { min-height: 2.75rem; border-radius: .4rem; }
+  @media (max-width: 760px) {
+    .workspace-header, .workspace-nav, .workspace-content { width: min(100% - 2rem, 76rem); }
+    .dashboard > .eyebrow { padding-inline: 1rem; font-size: .65rem; gap: .65rem; }
+    .workspace-nav { flex-wrap: wrap; overflow: visible; }
+    .workspace-nav a { padding: .75rem .8rem; }
+    .workspace-header { padding-block: 2rem 1.5rem; }
+    .workspace-content { grid-template-columns: 1fr; }
+    .workspace-content :global(section[aria-labelledby='device-heading']) { grid-column: auto; }
+    .workspace-content :global(section[aria-labelledby]) { padding: 1.25rem; }
+  }
 </style>

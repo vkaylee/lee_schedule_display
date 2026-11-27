@@ -42,6 +42,7 @@ default_model = "sonnet"
 skills = []
 
 [mcp.playwright]
-endpoint = "http://go:8080"
+endpoint = "http://ui-audit:8080"
 network = "lee-schedule-display-dev_default"
 login_path = "/"
+accounts_doc = "docs/dev-accounts.md"

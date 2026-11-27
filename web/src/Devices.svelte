@@ -10,7 +10,7 @@
       const [d, r] = await Promise.all([fetch('/api/devices'), fetch('/api/rooms')]);
       if (!d.ok || !r.ok) throw new Error();
       devices = await d.json(); rooms = await r.json();
-    } catch { error = t('Không thể tải thiết bị.', 'Could not load devices.'); }
+    } catch { error = ['Không thể tải thiết bị.', 'Could not load devices.']; }
   }
   async function create(event) {
     event.preventDefault(); busy = true; error = ''; token = '';
@@ -18,7 +18,7 @@
       const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim(),room_id:Number(roomId)})});
       if (!response.ok) throw new Error();
       token = (await response.json()).token; name = ''; roomId = ''; await load();
-    } catch { error = t('Không thể tạo thiết bị.', 'Could not create device.'); }
+    } catch { error = ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
   }
   async function setLanguage(device, event) {
@@ -29,7 +29,7 @@
       if (!response.ok) throw new Error();
       device.language = language;
       await load();
-    } catch { select.value = device.language; error = t('Không thể cập nhật ngôn ngữ thiết bị.', 'Could not update device language.'); }
+    } catch { select.value = device.language; error = ['Không thể cập nhật ngôn ngữ thiết bị.', 'Could not update device language.']; }
     finally { busy = false; }
   }
   async function revoke(device) {
@@ -39,14 +39,18 @@
       const response = await fetch(`/api/devices/${device.id}/revoke`, {method:'POST',headers:{'X-CSRF-Token':csrf}});
       if (!response.ok) throw new Error();
       await load();
-    } catch { error = t('Không thể thu hồi thiết bị.', 'Could not revoke device.'); }
+    } catch { error = ['Không thể thu hồi thiết bị.', 'Could not revoke device.']; }
     finally { busy = false; }
   }
-  onMount(load);
+  onMount(() => {
+    load();
+    window.addEventListener('rooms-changed', load);
+    return () => window.removeEventListener('rooms-changed', load);
+  });
 </script>
 <section aria-labelledby="device-heading">
   <h2 id="device-heading">{t('Thiết bị màn hình', 'Display devices')}</h2>
-  {#if error}<p role="alert">{error}</p>{/if}
+  {#if error}<p role="alert">{t(...error)}</p>{/if}
   {#if token}<p role="status">{t('Mã thiết bị chỉ hiển thị một lần. Nhập mã trên màn hình phòng:', 'The device token is shown only once. Enter it on the room display:')}</p><output aria-label={t('Mã thiết bị', 'Device token')}>{token}</output><button type="button" onclick={() => token = ''}>{t('Ẩn mã', 'Hide token')}</button>{/if}
   <ul>{#each devices as device (device.id)}<li>{device.name} — {rooms.find(r => r.id === device.room_id)?.name} — {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')} — {device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}{#if !device.revoked}<button type="button" disabled={busy || editing !== null} onclick={() => editing = device}>{t('Thiết kế màn hình', 'Design display')}</button><label>{t('Ngôn ngữ', 'Language')} {device.name} <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><button type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>{t('Thu hồi', 'Revoke')}</button>{/if}</li>{/each}</ul>
   {#if editing}<DisplayEditor device={editing} {csrf} onclose={() => editing = null} />{/if}

@@ -1,0 +1,38 @@
+services:
+  ui-audit:
+    image: lee-schedule-display-toolchain:local
+    build:
+      context: ..
+      dockerfile: .compose/Dockerfile
+    working_dir: /workspace
+    command:
+      - sh
+      - -ec
+      - |
+        : "$${PLAYWRIGHT_DEV_PASSWORD:?Set PLAYWRIGHT_DEV_PASSWORD}"
+        bun install --cwd web --frozen-lockfile
+        bun run --cwd web build
+        python3 .compose/playwright-overlay.py
+        go build -overlay /tmp/ui-overlay/overlay.json -o /usr/local/bin/schedule-ui-audit .
+        printf '%s' "$$PLAYWRIGHT_DEV_PASSWORD" | /usr/local/bin/schedule-ui-audit bootstrap admin
+        exec /usr/local/bin/schedule-ui-audit
+    environment:
+      DATABASE_PATH: /tmp/schedule-ui-audit.db
+      APP_ORIGIN: http://ui-audit:8080
+      LISTEN_ADDR: 0.0.0.0:8080
+      PLAYWRIGHT_DEV_PASSWORD: ${PLAYWRIGHT_DEV_PASSWORD:-}
+    volumes:
+      - ..:/workspace
+      - ui_modules:/workspace/web/node_modules
+    tmpfs:
+      - /tmp
+    networks:
+      - browser
+
+volumes:
+  ui_modules:
+
+networks:
+  browser:
+    external: true
+    name: lee-schedule-display-dev_default
