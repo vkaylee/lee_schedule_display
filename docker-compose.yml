@@ -11,7 +11,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
       LISTEN_ADDR: 0.0.0.0:8080
       TRUSTED_PROXY_IP: ${TRUSTED_PROXY_IP:-}
-      APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
+      APP_TIMEZONE: Asia/Ho_Chi_Minh
     ports:
       # Publish only on the host loopback interface.
       - "0.0.0.0:${APP_PORT:-8080}:8080"
