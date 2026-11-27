@@ -11,7 +11,14 @@ services:
       - ..:/workspace
       - test_modules:/workspace/web/node_modules
       - test_dist:/workspace/web/dist
+      - go_modules:/go/pkg/mod
+      - go_build:/root/.cache/go-build
 
 volumes:
   test_modules:
+    name: lee-schedule-display-test-modules
+  go_modules:
+    name: lee-schedule-display-test-go-modules
+  go_build:
+    name: lee-schedule-display-test-go-build
   test_dist:
