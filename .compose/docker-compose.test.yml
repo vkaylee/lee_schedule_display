@@ -9,16 +9,16 @@ services:
     command: ["sleep", "infinity"]
     volumes:
       - ..:/workspace
-      - test_modules:/workspace/web/node_modules
-      - test_dist:/workspace/web/dist
       - go_modules:/go/pkg/mod
       - go_build:/root/.cache/go-build
+    tmpfs:
+      - /workspace/web/node_modules:exec
+      - /workspace/web/dist
 
 volumes:
-  test_modules:
-    name: lee-schedule-display-test-modules
   go_modules:
+    external: true
     name: lee-schedule-display-test-go-modules
   go_build:
+    external: true
     name: lee-schedule-display-test-go-build
-  test_dist:
