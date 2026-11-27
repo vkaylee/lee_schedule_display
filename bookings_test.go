@@ -14,7 +14,8 @@ import (
 )
 
 func TestBookingConflictConcurrent(t *testing.T) {
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "bookings.db")+"?_pragma=busy_timeout(5000)")
+	path := filepath.Join(t.TempDir(), "bookings.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,25 +23,33 @@ func TestBookingConflictConcurrent(t *testing.T) {
 	if err = migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('room')"); err != nil {
+	if _, err = db.Exec("INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'),('admin2',X'03',X'04'); INSERT INTO rooms(name) VALUES('room')"); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("a", 43)
-	if _, err = db.Exec("INSERT INTO sessions VALUES (?,1,'csrf',?)", tokenHash(token), time.Now().Add(time.Hour).Unix()); err != nil {
+	otherToken := strings.Repeat("b", 43)
+	if _, err = db.Exec("INSERT INTO sessions VALUES (?,1,'csrf',?),(?,2,'csrf',?)", tokenHash(token), time.Now().Add(time.Hour).Unix(), tokenHash(otherToken), time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
 	h := handlerWithAuth(db, "https://example.test", netip.Addr{})
-	request := func(path, body string, auth bool) int {
+	requestAs := func(path, body, credential string) int {
 		r := httptest.NewRequest("POST", "https://example.test"+path, strings.NewReader(body))
 		r.Header.Set("Origin", "https://example.test")
 		r.Header.Set("X-CSRF-Token", "csrf")
 		r.Header.Set("If-Match", "1")
-		if auth {
-			r.AddCookie(&http.Cookie{Name: "__Host-session", Value: token})
+		if credential != "" {
+			r.AddCookie(&http.Cookie{Name: "__Host-session", Value: credential})
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w.Code
+	}
+	request := func(path, body string, auth bool) int {
+		credential := ""
+		if auth {
+			credential = token
+		}
+		return requestAs(path, body, credential)
 	}
 	body := func(start, end int64) string {
 		return fmt.Sprintf(`{"room_id":1,"title":"meeting","organizer":"admin","private":true,"starts":%d,"ends":%d}`, start, end)
@@ -51,8 +60,8 @@ func TestBookingConflictConcurrent(t *testing.T) {
 	start := make(chan struct{})
 	codes := make(chan int, 2)
 	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Go(func() { <-start; codes <- request("/api/bookings", body(10000000000, 10000000100), true) })
+	for _, credential := range []string{token, otherToken} {
+		wg.Go(func() { <-start; codes <- requestAs("/api/bookings", body(10000000000, 10000000100), credential) })
 	}
 	close(start)
 	wg.Wait()
@@ -94,5 +103,17 @@ func TestBookingConflictConcurrent(t *testing.T) {
 	}
 	if code := request("/api/bookings", body(3, 4), true); code != 400 {
 		t.Fatal(code)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err = db.QueryRow("SELECT COUNT(*) FROM bookings WHERE canceled=0 AND ((starts=10000000000 AND ends=10000000100) OR (starts=10000000100 AND ends=10000000200))").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("after reopen: %d %v", count, err)
 	}
 }

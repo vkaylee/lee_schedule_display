@@ -33,7 +33,7 @@ Rà soát độc lập xác minh timeout đọc body và cookie `__Host-`. Có t
 
 ## Ranh giới thiết bị kiosk (đang triển khai)
 
-Mã thiết bị là bearer token riêng theo phòng, chỉ cấp một lần và lưu bản băm tại máy chủ; phải bảo vệ mã như mật khẩu, không ghi vào URL hoặc log. Kiosk chỉ đọc dữ liệu phòng được gán, kiểm tra thu hồi và trạng thái phòng trên server; tiêu đề và người tổ chức họp riêng tư không xuất hiện trong payload. Trình duyệt giữ mã trong sessionStorage, nên mọi script cùng origin có thể đọc: cần bảo vệ origin, kiểm soát XSS và hạn chế truy cập máy kiosk. Khi mất mạng, thu hồi không thể có hiệu lực ngay tại màn hình; dữ liệu cũ phải chuyển Không xác định sau tối đa 15 phút. Cần rà soát bảo mật độc lập, thử thiết bị thật và gián đoạn trước vận hành.
+Mã thiết bị là bearer token riêng theo phòng, chỉ cấp một lần và lưu bản băm tại máy chủ; phải bảo vệ mã như mật khẩu, không ghi vào URL hoặc log. Kiosk chỉ đọc dữ liệu phòng được gán, kiểm tra thu hồi và trạng thái phòng trên server; tiêu đề và người tổ chức họp riêng tư không xuất hiện trong payload. Trình duyệt giữ mã trong sessionStorage, nên mọi script cùng origin có thể đọc: cần bảo vệ origin, kiểm soát XSS và hạn chế truy cập máy kiosk. Khi mất mạng, thu hồi không thể có hiệu lực ngay tại màn hình; dữ liệu cũ phải chuyển Không xác định sau tối đa 15 phút. Trình duyệt hiện xóa lịch khi phát hiện mất mạng, nhưng không thể đảm bảo chuyển trạng thái khi luồng giao diện treo hoặc thiết bị ngủ mà không phát sự kiện. Watchdog hiển thị độc lập hoặc giải pháp thiết bị tương đương chưa có; đây là rủi ro chặn vận hành. Cần rà soát bảo mật độc lập, thử thiết bị thật và gián đoạn trước vận hành.
 
 ## Rủi ro còn lại và vận hành
 

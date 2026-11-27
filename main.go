@@ -94,6 +94,18 @@ func validOrigin(origin string) bool {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if len(os.Args) != 4 {
+			log.Fatal("usage: server backup SOURCE DESTINATION")
+		}
+		if err := backupSQLite(os.Args[2], os.Args[3]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && (len(os.Args) != 3 || os.Args[1] != "bootstrap") {
+		log.Fatal("usage: server bootstrap USERNAME (password on stdin) or server backup SOURCE DESTINATION")
+	}
 	path := os.Getenv("DATABASE_PATH")
 	if path == "" {
 		path = "schedule.db"
@@ -112,9 +124,6 @@ func main() {
 		log.Fatal(err)
 	}
 	if len(os.Args) > 1 {
-		if len(os.Args) != 3 || os.Args[1] != "bootstrap" {
-			log.Fatal("usage: server bootstrap USERNAME (password on stdin)")
-		}
 		password, err := readPassword(os.Stdin)
 		if err != nil {
 			log.Fatal(err)

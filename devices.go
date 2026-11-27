@@ -17,7 +17,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		if _, _, _, ok := session(w, r); !ok {
 			return
 		}
-		rows, err := db.Query("SELECT id,name,room_id,revoked,last_seen FROM devices ORDER BY id")
+		rows, err := db.Query("SELECT id,name,room_id,revoked,last_seen,language FROM devices ORDER BY id")
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -29,11 +29,12 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			RoomID   int64  `json:"room_id"`
 			Revoked  bool   `json:"revoked"`
 			LastSeen *int64 `json:"last_seen"`
+			Language string `json:"language"`
 		}
 		devices := []device{}
 		for rows.Next() {
 			var d device
-			if rows.Scan(&d.ID, &d.Name, &d.RoomID, &d.Revoked, &d.LastSeen) != nil {
+			if rows.Scan(&d.ID, &d.Name, &d.RoomID, &d.Revoked, &d.LastSeen, &d.Language) != nil {
 				http.Error(w, "internal error", 500)
 				return
 			}
@@ -145,6 +146,65 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 	}
 	mux.HandleFunc("POST /api/devices", mutate(true))
 	mux.HandleFunc("POST /api/devices/{id}/revoke", mutate(false))
+	mux.HandleFunc("PUT /api/devices/{id}/language", post(func(w http.ResponseWriter, r *http.Request) {
+		token, _, csrf, ok := session(w, r)
+		if !ok {
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(csrf), []byte(r.Header.Get("X-CSRF-Token"))) != 1 {
+			http.Error(w, "forbidden", 403)
+			return
+		}
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		var input struct {
+			Language string `json:"language"`
+		}
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+		d.DisallowUnknownFields()
+		if err != nil || id <= 0 || d.Decode(&input) != nil || d.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en") {
+			http.Error(w, "invalid request", 400)
+			return
+		}
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		defer tx.Rollback()
+		if _, err = tx.Exec("UPDATE users SET active=active WHERE 0"); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		var actor int64
+		err = tx.QueryRow("SELECT users.id FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.csrf=? AND sessions.expires>? AND users.active=1", tokenHash(token), csrf, time.Now().Unix()).Scan(&actor)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		result, err := tx.Exec("UPDATE devices SET language=? WHERE id=? AND revoked=0", input.Language, id)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if n == 0 {
+			http.Error(w, "not found", 404)
+			return
+		}
+		if tx.Commit() != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		w.WriteHeader(204)
+	}))
 	mux.HandleFunc("GET /api/kiosk", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		authorization := r.Header.Get("Authorization")
@@ -165,9 +225,9 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			return
 		}
 		var roomID int64
-		var roomName string
+		var roomName, language string
 		var showTitle, showOrganizer bool
-		err = tx.QueryRow("SELECT rooms.id,rooms.name,rooms.show_title,rooms.show_organizer FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.token_hash=? AND devices.revoked=0 AND rooms.active=1", tokenHash(token)).Scan(&roomID, &roomName, &showTitle, &showOrganizer)
+		err = tx.QueryRow("SELECT rooms.id,rooms.name,rooms.show_title,rooms.show_organizer,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.token_hash=? AND devices.revoked=0 AND rooms.active=1", tokenHash(token)).Scan(&roomID, &roomName, &showTitle, &showOrganizer, &language)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "unauthorized", 401)
 			return
@@ -224,9 +284,10 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
 			Room       string  `json:"room"`
+			Language   string  `json:"language"`
 			Now        int64   `json:"now"`
 			Entries    []entry `json:"entries"`
 			ValidUntil *int64  `json:"valid_until"`
-		}{roomName, now, entries, validUntil})
+		}{roomName, language, now, entries, validUntil})
 	})
 }

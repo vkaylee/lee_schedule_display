@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 6 {
+	if version > 7 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -73,6 +73,12 @@ PRAGMA user_version = 5`); err != nil {
 	if version <= 5 {
 		if _, err := tx.Exec(`ALTER TABLE bookings ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
 PRAGMA user_version = 6`); err != nil {
+			return err
+		}
+	}
+	if version <= 6 {
+		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
+PRAGMA user_version = 7`); err != nil {
 			return err
 		}
 	}

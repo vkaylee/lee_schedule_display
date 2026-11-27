@@ -57,6 +57,10 @@ Mỗi tác vụ gồm lưu trữ + endpoint + UI phù hợp và test; vị trí 
 - Trước mỗi lát đọc các rulebook tương ứng cho migration, bảo mật, giao diện và vận hành. Migration bảo vệ dữ liệu; rollback ưu tiên restore/roll-forward khi rollback phá dữ liệu.
 - Sau khi người dùng duyệt và thoát plan mode: ghi kế hoạch vào `tasks/plan.md` và checklist `tasks/todo.md` theo yêu cầu skill, rồi mới triển khai nếu được yêu cầu. Hai file này chưa được tạo vì plan mode chỉ cho phép sửa file kế hoạch hiện tại.
 
+## Đánh giá recurrence
+
+`github.com/teambition/rrule-go` là ứng viên MIT, README mô tả port một phần RFC 2445; [mã nguồn](https://github.com/teambition/rrule-go/blob/master/rrule.go) cho thấy iterator bắt đầu từ `dtstart`, kiểm tra giới hạn số nhưng không xác thực DST gap/fold. Truy vấn xa có thể phải duyệt từ đầu; chưa có bằng chứng về phiên bản, tình trạng bảo trì và giới hạn công việc đủ đáp ứng yêu cầu. Chưa thêm dependency; cần kiểm tra phiên bản cố định, license và test DST, hiệu năng trước khi chọn. Prototype tự viết cũng chưa đạt các biên này.
+
 ## Điểm cần làm rõ trước tác vụ liên quan
 - Nếu chỉnh hoặc tách chuỗi khiến occurrence gốc của ngoại lệ biến mất, từ chối thay đổi và yêu cầu xử lý ngoại lệ trước; không tự xóa.
 - Với giờ địa phương không tồn tại hoặc mơ hồ do DST, từ chối và giải thích để người dùng chọn thời điểm khác.
