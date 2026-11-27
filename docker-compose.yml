@@ -9,6 +9,7 @@ services:
     environment:
       DATABASE_PATH: /data/schedule.db
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      ENV_DEV: ${ENV_DEV:-false}
       LISTEN_ADDR: 0.0.0.0:8080
       TRUSTED_PROXY_IP: ${TRUSTED_PROXY_IP:-}
       APP_TIMEZONE: Asia/Ho_Chi_Minh

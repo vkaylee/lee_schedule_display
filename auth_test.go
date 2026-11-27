@@ -115,16 +115,19 @@ func TestLoginLimitConcurrent(t *testing.T) {
 func TestHTTPOrigins(t *testing.T) {
 	for _, tc := range []struct {
 		origin string
+		dev    bool
 		valid  bool
 	}{
-		{"http://localhost:8080", true},
-		{"http://127.0.0.1:8080", true},
-		{"http://example.test", false},
-		{"https://example.test", true},
-		{"https://example.test/path", false},
+		{"http://localhost:8080", false, true},
+		{"http://127.0.0.1:8080", false, true},
+		{"http://192.168.2.162:8080", false, false},
+		{"http://192.168.2.162:8080", true, true},
+		{"http://example.test", true, false},
+		{"https://example.test", false, true},
+		{"https://example.test/path", false, false},
 	} {
-		if validOrigin(tc.origin) != tc.valid {
-			t.Errorf("validOrigin(%q) != %v", tc.origin, tc.valid)
+		if validOrigin(tc.origin, tc.dev) != tc.valid {
+			t.Errorf("validOrigin(%q, %v) != %v", tc.origin, tc.dev, tc.valid)
 		}
 	}
 }
@@ -142,7 +145,15 @@ func TestAuthenticationOverLocalHTTP(t *testing.T) {
 	if err := bootstrap(db, "admin", "long-password-123"); err != nil {
 		t.Fatal(err)
 	}
-	for _, origin := range []string{"http://localhost:8080", "https://example.test"} {
+	for _, tc := range []struct {
+		origin, cookieName string
+		secure             bool
+	}{
+		{"http://localhost:8080", "__Host-session", true},
+		{"https://example.test", "__Host-session", true},
+		{"http://192.168.2.162:8080", "dev-session", false},
+	} {
+		origin := tc.origin
 		h := authHandler(db, origin, netip.Addr{}, time.UTC)
 		r := httptest.NewRequest("POST", "http://localhost:8080/api/login", strings.NewReader(`{"username":"admin","password":"long-password-123"}`))
 		r.Header.Set("Origin", origin)
@@ -152,8 +163,8 @@ func TestAuthenticationOverLocalHTTP(t *testing.T) {
 			t.Fatalf("%s: %d", origin, w.Code)
 		}
 		cookie := w.Result().Cookies()[0]
-		if !cookie.Secure {
-			t.Fatal("session cookie must be Secure")
+		if cookie.Name != tc.cookieName || cookie.Secure != tc.secure {
+			t.Fatalf("session cookie = %q, Secure=%v", cookie.Name, cookie.Secure)
 		}
 		r = httptest.NewRequest("GET", "http://localhost:8080/api/session", nil)
 		r.AddCookie(cookie)

@@ -92,12 +92,22 @@ func newServer(h http.Handler) *http.Server {
 	return &http.Server{Addr: "127.0.0.1:8080", Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second}
 }
 
-func validOrigin(origin string) bool {
+func validOrigin(origin string, dev bool) bool {
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
 		return false
 	}
-	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))
+	if u.Scheme == "https" {
+		return true
+	}
+	if u.Scheme != "http" {
+		return false
+	}
+	if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" {
+		return true
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	return dev && err == nil && ip.IsPrivate()
 }
 
 func main() {
@@ -140,12 +150,13 @@ func main() {
 		}
 		return
 	}
+	dev := os.Getenv("ENV_DEV") == "true"
 	origin := os.Getenv("APP_ORIGIN")
 	if origin == "" {
 		origin = "http://localhost:8080"
 	}
-	if !validOrigin(origin) {
-		log.Fatal("APP_ORIGIN must be HTTPS or HTTP on localhost")
+	if !validOrigin(origin, dev) {
+		log.Fatal("APP_ORIGIN must be HTTPS or HTTP on localhost; private-network HTTP requires ENV_DEV=true")
 	}
 	var trustedProxy netip.Addr
 	if value := os.Getenv("TRUSTED_PROXY_IP"); value != "" {

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -248,6 +249,12 @@ func (l *loginLimit) allow(host string) bool {
 
 func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *time.Location) http.Handler {
 	limit := &loginLimit{attempts: make(map[string][]time.Time)}
+	cookieName := "__Host-session"
+	secureCookie := true
+	if u, err := url.Parse(origin); err == nil && u.Scheme == "http" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
+		cookieName = "dev-session"
+		secureCookie = false
+	}
 	mux := http.NewServeMux()
 	post := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -342,7 +349,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *t
 			http.Error(w, "invalid credentials", 401)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "__Host-session", Value: token, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(sessionDuration.Seconds())})
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: token, Path: "/", HttpOnly: true, Secure: secureCookie, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(sessionDuration.Seconds())})
 		var language string
 		if err := db.QueryRow("SELECT language FROM users WHERE id = ?", id).Scan(&language); err != nil {
 			http.Error(w, "internal error", 500)
@@ -353,7 +360,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *t
 	}))
 	session := func(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
 		w.Header().Set("Cache-Control", "no-store")
-		cookies := r.CookiesNamed("__Host-session")
+		cookies := r.CookiesNamed(cookieName)
 		if len(cookies) != 1 || len(cookies[0].Value) != 43 {
 			http.Error(w, "unauthorized", 401)
 			return "", "", "", false
@@ -426,7 +433,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *t
 			http.Error(w, "internal error", 500)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "__Host-session", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+		http.SetCookie(w, &http.Cookie{Name: cookieName, Path: "/", Secure: secureCookie, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 		w.WriteHeader(204)
 	}))
 	registerUserHandlers(mux, db, post, session)
