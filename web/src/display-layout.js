@@ -9,6 +9,11 @@ export const defaultDisplayLayout = [
   { type: 'footer', x: 0, y: 6, w: 12, h: 1 }
 ];
 
+export function gridCell(position, start, size, paddingStart, paddingEnd, gap, count) {
+  const cell = (size - paddingStart - paddingEnd - gap * (count - 1)) / count;
+  return Math.floor((position - start - paddingStart) / (cell + gap));
+}
+
 export function validDisplayLayout(blocks) {
   if (!Array.isArray(blocks) || blocks.length > displayBlocks.length) return false;
   const seen = new Set();

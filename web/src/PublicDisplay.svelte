@@ -4,9 +4,9 @@
   import DisplayCanvas from './DisplayCanvas.svelte';
   import { defaultDisplayLayout } from './display-layout.js';
   let { id } = $props();
-  let data = $state(null), config = $state({ organization:'', logo:'', blocks:defaultDisplayLayout }), zone = $state('UTC'), status = $state('Không xác định'), clock = $state(new Date()), error = $state('');
+  let data = $state(null), config = $state({ organization:'', logo:'', blocks:defaultDisplayLayout }), zone = $state('UTC'), status = $state('Không xác định'), clock = $state(new Date()), scheduleNow = $state(null), error = $state('');
   let syncClock = 0, syncWall = 0, serverNow = 0, uncertainty = 0, generation = 0, syncing = false;
-  function tick() { clock = new Date(); status = statusAt(data, performance.now() - syncClock, Date.now() - syncWall, serverNow, uncertainty, 30000); }
+  function tick() { const elapsed = performance.now() - syncClock; status = statusAt(data, elapsed, Date.now() - syncWall, serverNow, uncertainty, 30000); scheduleNow = status === 'Không xác định' ? null : serverNow + elapsed / 1000; if (scheduleNow !== null) clock = new Date(scheduleNow * 1000); }
   async function sync() {
     if (syncing || document.hidden) return;
     syncing = true; const current = generation, start = performance.now(), wall = Date.now();
@@ -29,5 +29,5 @@
     return () => { clearInterval(timer); clearInterval(clockTimer); window.removeEventListener('offline', invalidate); window.removeEventListener('pagehide', invalidate); window.removeEventListener('pageshow', visibility); document.removeEventListener('visibilitychange', visibility); };
   });
 </script>
-<main><DisplayCanvas {config} {data} {status} {zone} {clock} />{#if error}<p role="alert">{error}</p>{/if}</main>
+<main><DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} />{#if error}<p role="alert">{error}</p>{/if}</main>
 <style>main{margin:0;min-height:100vh;background:#e9f2f7}p{padding:1rem;color:#7d261e}</style>

@@ -23,8 +23,9 @@
   async function save() {
     busy = true; message = '';
     try {
-      const response = await fetch(`/api/devices/${device.id}/display`, { method:'POST', headers:{ 'Content-Type':'application/json', 'X-CSRF-Token':csrf }, body:JSON.stringify(config) });
-      if (!response.ok) throw new Error(); saved = JSON.stringify(config); message = 'Đã lưu bố cục.';
+      const submitted = JSON.stringify(config);
+      const response = await fetch(`/api/devices/${device.id}/display`, { method:'POST', headers:{ 'Content-Type':'application/json', 'X-CSRF-Token':csrf }, body:submitted });
+      if (!response.ok) throw new Error(); saved = submitted; message = JSON.stringify(config) === submitted ? 'Đã lưu bố cục.' : 'Đã lưu phiên bản trước; còn thay đổi chưa lưu.';
     } catch { message = 'Không thể lưu. Kiểm tra thông tin và thử lại.'; } finally { busy = false; }
   }
   function close() { if (!config || JSON.stringify(config) === saved || window.confirm('Bỏ các thay đổi chưa lưu?')) onclose(); }
@@ -37,13 +38,13 @@
   <header><div><h3 id="editor-title">Thiết kế: {device.name}</h3><p>Kéo khối trên bản xem trước hoặc dùng điều khiển vị trí bên dưới.</p></div><button type="button" onclick={close}>Đóng</button></header>
   {#if message}<p role="status">{message}</p>{/if}
   {#if config}
-    <div class="workspace"><div><DisplayCanvas {config} data={{room:'Phòng họp', entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" editing onmove={move} /></div>
+    <div class="workspace"><div><DisplayCanvas {config} data={{room:'Phòng họp', entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} /></div>
       <aside>
         <label>Tên tổ chức <input maxlength="128" bind:value={config.organization} /></label>
         <label>Đường dẫn logo nội bộ <input maxlength="256" placeholder="/logo.png" bind:value={config.logo} /></label>
         <fieldset><legend>Khối hiển thị</legend>{#each displayBlocks as type}<label><input type="checkbox" checked={config.blocks.some(b => b.type === type)} onchange={(e) => toggle(type,e.currentTarget.checked)} /> {labels[type]}</label>{/each}</fieldset>
         <label>Chọn khối <select bind:value={selected}>{#each config.blocks as b}<option value={b.type}>{labels[b.type]}</option>{/each}</select></label>
-        {#if block}<div class="coordinates">{#each ['x','y','w','h'] as key}<label>{({x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[key]} <input type="number" min={key === 'x' || key === 'y' ? 0 : 1} max={key === 'x' || key === 'w' ? 12 : 24} value={block[key]} onchange={(e) => replace(selected, { [key]:Number(e.currentTarget.value) })} /></label>{/each}</div>{/if}
+        {#if block}<div class="coordinates">{#each ['x','y','w','h'] as key}<label>{({x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[key]} <input type="number" min={key === 'x' || key === 'y' ? 0 : 1} max={key === 'x' || key === 'w' ? 12 : 24} value={block[key]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [key]:Number(input.value) }); input.value = String(config.blocks.find(b => b.type === selected)[key]); }} /></label>{/each}</div>{/if}
         <button type="button" onclick={() => config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }}>Dùng mẫu mặc định</button>
         <button type="button" disabled={busy} onclick={save}>{busy ? 'Đang lưu…' : 'Lưu thiết kế'}</button>
         <a href={`/display/${device.id}`} target="_blank" rel="noreferrer">Mở màn hình công khai</a>

@@ -1,6 +1,10 @@
 import { strict as assert } from 'node:assert';
-import { defaultDisplayLayout, validDisplayLayout } from './display-layout.js';
+import { defaultDisplayLayout, gridCell, validDisplayLayout } from './display-layout.js';
 
+assert.equal(gridCell(126, 100, 262, 10, 10, 2, 12), 0);
+assert.equal(gridCell(132, 100, 262, 10, 10, 2, 12), 1);
+assert.equal(gridCell(342, 100, 262, 10, 10, 2, 12), 11);
+assert.equal(gridCell(109, 100, 262, 10, 10, 2, 12), -1);
 assert.equal(validDisplayLayout(defaultDisplayLayout), true);
 assert.equal(validDisplayLayout([]), true);
 assert.equal(validDisplayLayout([...defaultDisplayLayout, defaultDisplayLayout[0]]), false);
