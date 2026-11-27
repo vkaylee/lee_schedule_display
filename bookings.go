@@ -134,8 +134,12 @@ func registerBookingHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 					http.Error(w, "internal error", 500)
 					return
 				}
+				if err = materializeUnboundedRoomTx(tx, time.Unix(b.Starts, 0), time.Unix(b.Ends, 0), b.RoomID); err != nil {
+					http.Error(w, "cannot validate recurrence at requested time", 400)
+					return
+				}
 				var conflict bool
-				err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND id!=? AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.room_id=? AND o.starts<? AND o.ends>?)`, b.RoomID, id, b.Ends, b.Starts, b.RoomID, b.Ends, b.Starts).Scan(&conflict)
+				err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND id!=? AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.starts<? AND o.ends>?)`, b.RoomID, id, b.Ends, b.Starts, b.RoomID, b.Ends, b.Starts).Scan(&conflict)
 				if err != nil {
 					http.Error(w, "internal error", 500)
 					return

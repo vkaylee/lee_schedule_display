@@ -15,11 +15,11 @@ import (
 )
 
 type displayBlock struct {
-	Type  string `json:"type"`
-	X     int    `json:"x"`
-	Y     int    `json:"y"`
-	W     int    `json:"w"`
-	H     int    `json:"h"`
+	Type     string `json:"type"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+	W        int    `json:"w"`
+	H        int    `json:"h"`
 	ID       string `json:"id,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Color    string `json:"color,omitempty"`
@@ -192,9 +192,15 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.NotFound(w, r)
 			return
 		}
+		tx, err := db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		defer tx.Rollback()
 		var raw, room, language string
 		var roomID int64
-		err := db.QueryRow("SELECT devices.display_config,rooms.id,rooms.name,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.public_id=? AND devices.revoked=0 AND rooms.active=1", value).Scan(&raw, &roomID, &room, &language)
+		err = tx.QueryRow("SELECT devices.display_config,rooms.id,rooms.name,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.public_id=? AND devices.revoked=0 AND rooms.active=1", value).Scan(&raw, &roomID, &room, &language)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -209,7 +215,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		now := time.Now().Unix()
-		rows, err := db.Query("SELECT starts,ends FROM (SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.room_id=? AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
+		rows, err := tx.Query("SELECT starts,ends FROM (SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -232,11 +238,27 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
+		if err = rows.Close(); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
 		var validUntil *int64
 		if len(entries) > 100 {
 			cutoff := entries[100].Starts
 			validUntil = &cutoff
 			entries = entries[:100]
+		}
+		coverage, err := trustedDisplayCoverage(tx, roomID, now)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if coverage.Valid && (validUntil == nil || coverage.Int64 < *validUntil) {
+			validUntil = &coverage.Int64
+		}
+		if err = tx.Commit(); err != nil {
+			http.Error(w, "internal error", 500)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {

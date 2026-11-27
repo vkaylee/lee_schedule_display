@@ -23,7 +23,7 @@ func TestAccountLanguageMigration(t *testing.T) {
 	if err := migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE users DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version = 7;
+	if _, err := db.Exec(`DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE users DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version = 7;
 INSERT INTO users(username,salt,password_hash) VALUES('existing',X'01',X'02');
 INSERT INTO rooms(name) VALUES('room');
 INSERT INTO devices(room_id,name,token_hash,language) VALUES(1,'device',X'03','en')`); err != nil {

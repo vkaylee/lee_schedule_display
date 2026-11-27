@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 11 {
+	if version > 15 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -109,6 +109,65 @@ CREATE UNIQUE INDEX devices_public_id ON devices(public_id) WHERE public_id<>'';
 PRAGMA user_version=11`); err != nil {
 			return err
 		}
+	}
+	if version >= 11 {
+		var hasPublicID int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='public_id'").Scan(&hasPublicID); err != nil {
+			return err
+		}
+		if hasPublicID != 1 {
+			return errors.New("unsupported experimental database schema")
+		}
+	}
+	if version <= 11 {
+		if _, err := tx.Exec(`ALTER TABLE booking_series ADD COLUMN checked_through INTEGER;
+UPDATE booking_series SET checked_through=(SELECT MAX(ends) FROM series_occurrences WHERE series_id=booking_series.id);
+PRAGMA user_version=12`); err != nil {
+			return err
+		}
+	}
+	if version <= 12 {
+		if _, err := tx.Exec(`CREATE TABLE new_series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), original_starts INTEGER NOT NULL, starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), room_id INTEGER REFERENCES rooms(id), title TEXT, organizer TEXT, private INTEGER CHECK(private IN (0,1)), PRIMARY KEY(series_id,original_starts));
+INSERT INTO new_series_occurrences(series_id,original_starts,starts,ends) SELECT series_id,starts,starts,ends FROM series_occurrences;
+DROP TABLE series_occurrences;
+ALTER TABLE new_series_occurrences RENAME TO series_occurrences;
+CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends);
+CREATE TABLE occurrence_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, original_starts INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
+PRAGMA user_version = 13`); err != nil {
+			return err
+		}
+	}
+	if version <= 13 {
+		if _, err := tx.Exec(`CREATE TABLE conflict_alerts (id INTEGER PRIMARY KEY, series_a INTEGER NOT NULL, original_a INTEGER NOT NULL, series_b INTEGER NOT NULL, original_b INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)), acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)), UNIQUE(series_a,original_a,series_b,original_b)); CREATE TABLE conflict_scan_status(id INTEGER PRIMARY KEY CHECK(id=1),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1))); INSERT INTO conflict_scan_status(id) VALUES(1); CREATE TABLE room_scan_status(room_id INTEGER PRIMARY KEY REFERENCES rooms(id),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1))); INSERT INTO room_scan_status(room_id) SELECT id FROM rooms; PRAGMA user_version=14`); err != nil {
+			return err
+		}
+	}
+	if version <= 14 {
+		if _, err := tx.Exec(`CREATE TABLE materialization_coverage(series_id INTEGER PRIMARY KEY REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts)); PRAGMA user_version=15`); err != nil {
+			return err
+		}
+	}
+	var compatible bool
+	if err := tx.QueryRow(`SELECT
+(SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='public_id')=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name IN ('id','room_id','title','organizer','private','rule','actor_id','checked_through'))=8 AND
+(SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name='id' AND pk=1)=1 AND
+(SELECT COUNT(*) FROM pragma_index_list('devices') WHERE name='devices_public_id' AND "unique"=1 AND partial=1)=1 AND
+(SELECT COUNT(*) FROM pragma_index_info('devices_public_id') WHERE seqno=0 AND name='public_id')=1 AND
+(SELECT COUNT(*) FROM pragma_index_info('devices_public_id'))=1 AND
+(SELECT COUNT(*) FROM sqlite_schema WHERE type='index' AND name='devices_public_id' AND lower(replace(replace(sql,' ',''),char(10),'')) LIKE '%wherepublic_id<>''''')=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('series_occurrences') WHERE name IN ('series_id','original_starts','starts','ends','version','canceled','room_id','title','organizer','private'))=10 AND
+(SELECT COUNT(*) FROM pragma_table_info('series_occurrences') WHERE (name='series_id' AND pk=1) OR (name='original_starts' AND pk=2))=2 AND
+(SELECT COUNT(*) FROM pragma_table_info('series_occurrences') WHERE name IN ('series_id','original_starts','starts','ends','version','canceled') AND "notnull"=1)=6 AND
+(SELECT COUNT(*) FROM pragma_table_info('series_occurrences') WHERE (name='version' AND dflt_value='1') OR (name='canceled' AND dflt_value='0'))=2 AND
+(SELECT COUNT(*) FROM pragma_foreign_key_list('series_occurrences') WHERE "from"='series_id' AND "table"='booking_series' AND "to"='id')=1 AND
+(SELECT COUNT(*) FROM pragma_foreign_key_list('series_occurrences') WHERE "from"='room_id' AND "table"='rooms' AND "to"='id')=1 AND
+(SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='series_occurrences' AND lower(replace(replace(sql,' ',''),char(10),'')) LIKE '%check(ends>starts)%' AND lower(replace(replace(sql,' ',''),char(10),'')) LIKE '%check(canceledin(0,1))%' AND lower(replace(replace(sql,' ',''),char(10),'')) LIKE '%check(privatein(0,1))%')=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('occurrence_audit') WHERE name IN ('id','actor_id','series_id','original_starts','action','created_at'))=6`).Scan(&compatible); err != nil {
+		return err
+	}
+	if !compatible {
+		return errors.New("unsupported or incomplete database schema")
 	}
 	return tx.Commit()
 }
@@ -363,6 +422,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *t
 	registerRoomHandlers(mux, db, post, session)
 	registerBookingHandlers(mux, db, post, session)
 	registerSeriesHandlers(mux, db, post, session, timezone)
+	registerAlertHandlers(mux, db, post, session)
 	registerDeviceHandlers(mux, db, post, session)
 	registerDisplayHandlers(mux, db, post, session)
 	return mux

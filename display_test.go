@@ -88,7 +88,7 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO bookings(room_id,title,organizer,private,starts,ends) VALUES(1,'private title','private organizer',0,?,?)`, now+300, now+600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series organizer',1,'{}',1); INSERT INTO series_occurrences(series_id,starts,ends) VALUES(1,?,?)`, now+700, now+800); err != nil {
+	if _, err := db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series organizer',1,'{}',1); INSERT INTO series_occurrences(series_id,original_starts,starts,ends) VALUES(1,?,?,?)`, now+700, now+700, now+800); err != nil {
 		t.Fatal(err)
 	}
 	publicID := strings.Repeat("a", 32)

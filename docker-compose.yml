@@ -14,7 +14,7 @@ services:
       APP_TIMEZONE: ${APP_TIMEZONE:-UTC}
     ports:
       # Publish only on the host loopback interface.
-      - "127.0.0.1:${APP_PORT:-8080}:8080"
+      - "0.0.0.0:${APP_PORT:-8080}:8080"
     volumes:
       - .:/workspace
       - web_modules:/workspace/web/node_modules

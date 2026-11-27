@@ -32,14 +32,9 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	if _, err = db.Exec("INSERT INTO sessions VALUES (?,1,'csrf',?)", tokenHash(token), time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	start := time.Now().UTC().Truncate(time.Second).AddDate(2, 0, 0)
 	rule := recurrence.Rule{Start: start, Location: time.UTC, Frequency: recurrence.Daily, Interval: 1, Count: 3, Duration: time.Hour}
 	b := booking{RoomID: 1, Title: "meeting", Organizer: "admin", Private: true}
-	tooLong := rule
-	tooLong.Count = 800
-	if err = storeSeries(db, token, "csrf", b, tooLong); !errors.Is(err, errSeriesBeyondHorizon) {
-		t.Fatalf("horizon: %v", err)
-	}
 	selfOverlap := rule
 	selfOverlap.Duration = 25 * time.Hour
 	if err = storeSeries(db, token, "csrf", b, selfOverlap); !errors.Is(err, errSeriesConflict) {
@@ -84,7 +79,7 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	get.AddCookie(&http.Cookie{Name: "__Host-session", Value: token})
 	list := httptest.NewRecorder()
 	seriesHandler.ServeHTTP(list, get)
-	if list.Code != 200 || !strings.Contains(list.Body.String(), `"title":"meeting"`) || !strings.Contains(list.Body.String(), fmt.Sprintf(`"checked_through":%d`, start.Add(49*time.Hour).Unix())) || !strings.Contains(list.Body.String(), fmt.Sprintf(`"starts":%d`, start.Unix())) {
+	if list.Code != 200 || !strings.Contains(list.Body.String(), `"title":"meeting"`) || !strings.Contains(list.Body.String(), fmt.Sprintf(`"checked_through":%d`, start.AddDate(1, 0, 0).Unix())) || !strings.Contains(list.Body.String(), fmt.Sprintf(`"starts":%d`, start.Unix())) {
 		t.Fatalf("series list %d %s", list.Code, list.Body.String())
 	}
 	post := func(body string, authenticated bool, csrf string) *httptest.ResponseRecorder {
@@ -117,7 +112,7 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	if w := post(payload, true, "csrf"); w.Code != 201 {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
-	long := fmt.Sprintf(`{"room_id":1,"title":"other","organizer":"admin","starts":%d,"duration_seconds":3600,"frequency":1,"interval":1,"count":800}`, start.Add(10*24*time.Hour).Unix())
+	long := fmt.Sprintf(`{"room_id":1,"title":"other","organizer":"admin","starts":%d,"duration_seconds":3600,"frequency":1,"interval":1,"count":800}`, start.Add(20*24*time.Hour+12*time.Hour).Unix())
 	zone, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +128,8 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	if dstResponse.Code != 400 || !strings.Contains(dstResponse.Body.String(), "ambiguous") {
 		t.Fatalf("DST: %d %s", dstResponse.Code, dstResponse.Body.String())
 	}
-	if w := post(long, true, "csrf"); w.Code != 400 || !strings.Contains(w.Body.String(), "12-month") {
-		t.Fatalf("limit: %d %s", w.Code, w.Body.String())
+	if w := post(long, true, "csrf"); w.Code != 201 {
+		t.Fatalf("long finite series: %d %s", w.Code, w.Body.String())
 	}
 	for _, path := range []string{"/api/bookings/1", "/api/bookings/1/cancel"} {
 		r := httptest.NewRequest("POST", "https://example.test"+path, strings.NewReader(`{"room_id":1,"title":"changed","organizer":"admin","starts":100,"ends":200,"version":1}`))

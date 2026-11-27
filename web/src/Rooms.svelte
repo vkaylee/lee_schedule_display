@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
+  import Banner from './Banner.svelte';
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let rooms = $state([]);
@@ -52,37 +54,183 @@
 </script>
 
 <section aria-labelledby="rooms-heading">
-  <h2 id="rooms-heading">{t('Quản lý phòng', 'Room management')}</h2>
-  {#if error}<p role="alert">{t(...error)}</p>{/if}
-  {#if notice}<p role="status">{t(...notice)}</p>{/if}
-  {#if loading}<p role="status">{t('Đang tải phòng…', 'Loading rooms…')}</p>
-  {:else if rooms.length === 0}<p>{t('Chưa có phòng.', 'No rooms yet.')}</p>
-  {:else}
-    <ul>
-      {#each rooms as room (room.id)}
-        <li>{room.name} — {room.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
-          <button type="button" disabled={busy} aria-label={`${t('Sửa phòng', 'Edit room')} ${room.name}`} onclick={() => edit(room)}>{t('Sửa', 'Edit')}</button>
-        </li>
-      {/each}
-    </ul>
-  {/if}
-  <form onsubmit={save}>
-    <h3>{editing ? t('Sửa phòng', 'Edit room') : t('Tạo phòng', 'Create room')}</h3>
-    <label for="room-name">{t('Tên phòng', 'Room name')}</label>
-    <input id="room-name" bind:value={name} maxlength="128" required />
-    {#if editing}<label><input type="checkbox" bind:checked={active} /> {t('Đang hoạt động', 'Active')}</label>{/if}
-    <label><input type="checkbox" bind:checked={showTitle} /> {t('Hiển thị tiêu đề trên màn hình', 'Show title on display')}</label>
-    <label><input type="checkbox" bind:checked={showOrganizer} /> {t('Hiển thị người tổ chức trên màn hình', 'Show organizer on display')}</label>
-    <button type="submit" disabled={busy}>{t('Lưu phòng', 'Save room')}</button>
-    {#if editing}<button type="button" disabled={busy} onclick={clear}>{t('Hủy', 'Cancel')}</button>{/if}
-  </form>
+  <div class="section-head">
+    <div>
+      <p class="section-kicker">{t('DANH MỤC PHÒNG HỌP', 'MEETING SPACES')}</p>
+      <h2 id="rooms-heading">{t('Quản lý phòng', 'Room management')}</h2>
+      <p>{t('Thiết lập phòng họp và chính sách hiển thị thông tin trên màn hình.', 'Configure meeting rooms and public display privacy policies.')}</p>
+    </div>
+  </div>
+
+  {#if error}<Banner kind="error" text={t(...error)} />{/if}
+  {#if notice}<Banner kind="success" text={t(...notice)} />{/if}
+
+  <div class="ui-split">
+    <div>
+      {#if loading}
+        <p class="ui-loading" role="status">
+          <span class="ui-spinner" aria-hidden="true"></span>
+          <span>{t('Đang tải phòng…', 'Loading rooms…')}</span>
+        </p>
+      {:else if rooms.length === 0}
+        <div class="ui-empty">
+          <strong>{t('Chưa có phòng.', 'No rooms yet.')}</strong>
+          <p>{t('Sử dụng biểu mẫu bên cạnh để tạo phòng họp đầu tiên.', 'Use the form to create your first meeting room.')}</p>
+        </div>
+      {:else}
+        <ul class="ui-card-list">
+          {#each rooms as room (room.id)}
+            <li class="ui-card room-card" class:is-editing={editing === room.id}>
+              <div class="room-main">
+                <div class="room-title-row">
+                  <strong>{room.name}</strong>
+                  <span class={room.active ? 'ui-pill ui-pill--success' : 'ui-pill ui-pill--neutral'}>
+                    {room.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
+                  </span>
+                </div>
+                <div class="room-meta">
+                  <span class="meta-tag" class:meta-tag--on={room.show_title}>
+                    {room.show_title ? t('Hiện tiêu đề', 'Title visible') : t('Ẩn tiêu đề', 'Title hidden')}
+                  </span>
+                  <span class="meta-tag" class:meta-tag--on={room.show_organizer}>
+                    {room.show_organizer ? t('Hiện người tổ chức', 'Organizer visible') : t('Ẩn người tổ chức', 'Organizer hidden')}
+                  </span>
+                </div>
+              </div>
+              <button class="secondary" type="button" disabled={busy} aria-label={`${t('Sửa phòng', 'Edit room')} ${room.name}`} onclick={() => edit(room)}>
+                <Icon name="edit" />
+                <span>{t('Sửa', 'Edit')}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
+    <div class="ui-sticky-pane">
+      <form class:ui-form-editing={editing !== null} onsubmit={save}>
+        <h3>{editing ? t('Sửa phòng', 'Edit room') : t('Tạo phòng', 'Create room')}</h3>
+        <label for="room-name">{t('Tên phòng', 'Room name')}</label>
+        <input id="room-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: Phòng họp Tầng 3', 'e.g. Boardroom 3A')} />
+
+        {#if editing}
+          <label class="toggle-row">
+            <input type="checkbox" bind:checked={active} />
+            <span>
+              <strong>{t('Đang hoạt động', 'Active')}</strong>
+              <small>{t('Bỏ chọn để ngừng đặt lịch mới nhưng vẫn giữ lịch cũ.', 'Uncheck to stop new bookings while preserving history.')}</small>
+            </span>
+          </label>
+        {/if}
+
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={showTitle} />
+          <span>
+            <strong>{t('Hiển thị tiêu đề trên màn hình', 'Show title on display')}</strong>
+            <small>{t('Cho phép hiện tên cuộc họp trên kiosk và màn hình công khai.', 'Allow meeting titles to appear on kiosks and public displays.')}</small>
+          </span>
+        </label>
+
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={showOrganizer} />
+          <span>
+            <strong>{t('Hiển thị người tổ chức trên màn hình', 'Show organizer on display')}</strong>
+            <small>{t('Cho phép hiện tên người đặt lịch trên kiosk.', 'Allow organizer names to appear on room kiosks.')}</small>
+          </span>
+        </label>
+
+        <div class="ui-form-actions">
+          <button type="submit" disabled={busy}>{t('Lưu phòng', 'Save room')}</button>
+          {#if editing}
+            <button class="secondary" type="button" disabled={busy} onclick={clear}>{t('Hủy', 'Cancel')}</button>
+          {/if}
+        </div>
+      </form>
+    </div>
+  </div>
 </section>
+
 <style>
-  section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #c9d7d9; }
-  form { display: grid; gap: .5rem; }
-  input:not([type='checkbox']) { padding: .5rem; font: inherit; }
-  label { line-height: 1.5; }
-  button { font: inherit; padding: .5rem; }
-  li { overflow-wrap: anywhere; margin-bottom: .5rem; }
-  [role='alert'] { color: #7d261e; }
+  .room-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.9rem;
+  }
+
+  .room-main {
+    min-width: 0;
+    flex: 1 1 14rem;
+  }
+
+  .room-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .room-title-row strong {
+    font-size: 1.02rem;
+    color: var(--ink-primary);
+  }
+
+  .room-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .meta-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.55rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    font-weight: 500;
+    background: var(--bg-subtle);
+    color: var(--ink-muted);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .meta-tag--on {
+    background: #eef6f0;
+    color: #195637;
+    border-color: #cde2d3;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    cursor: pointer;
+  }
+
+  .toggle-row input[type='checkbox'] {
+    margin-top: 0.2rem;
+  }
+
+  .toggle-row span {
+    display: grid;
+    gap: 0.1rem;
+  }
+
+  .toggle-row strong {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--ink-primary);
+  }
+
+  .toggle-row small {
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--ink-muted);
+    line-height: 1.35;
+  }
 </style>

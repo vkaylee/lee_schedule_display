@@ -12,14 +12,15 @@ export function localTimeSeconds(epoch, zone) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}`;
 }
 export function instant(local, zone) {
-  if (!zone || !/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;
-  const nominal = Date.parse(local + ':00Z');
+  if (!zone || !/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(local)) return null;
+  const normalized = local.length === 16 ? local + ':00' : local;
+  const nominal = Date.parse(normalized + 'Z');
   if (!Number.isFinite(nominal)) return null;
   const offsets = new Set();
   for (let h = -48; h <= 48; h += 6) {
     const sample = nominal + h * 3600000;
-    offsets.add(Date.parse(localTime(sample / 1000, zone) + ':00Z') - sample);
+    offsets.add(Date.parse(localTimeSeconds(sample / 1000, zone) + 'Z') - sample);
   }
-  const matches = [...offsets].map(offset => (nominal - offset) / 1000).filter(epoch => localTime(epoch, zone) === local);
+  const matches = [...offsets].map(offset => (nominal - offset) / 1000).filter(epoch => localTimeSeconds(epoch, zone) === normalized);
   return matches.length === 1 ? matches[0] : null;
 }

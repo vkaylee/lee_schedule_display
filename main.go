@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -57,6 +58,9 @@ func handlerWithTimezone(db *sql.DB, origin string, trustedProxy netip.Addr, tim
 		mux.Handle("/api/bookings", auth)
 		mux.Handle("/api/bookings/*", auth)
 		mux.Handle("/api/series", auth)
+		mux.Handle("/api/series/*", auth)
+		mux.Handle("/api/alerts", auth)
+		mux.Handle("/api/alerts/*", auth)
 		mux.Handle("/api/devices", auth)
 		mux.Handle("/api/devices/*", auth)
 		mux.Handle("/api/kiosk", auth)
@@ -158,6 +162,9 @@ func main() {
 	if err != nil || zone == "Local" {
 		log.Fatal("APP_TIMEZONE must be a valid IANA timezone")
 	}
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	go conflictWorker(context.Background(), db, func() time.Time { return time.Now().In(timezone) }, ticker.C)
 	server := newServer(handlerWithTimezone(db, origin, trustedProxy, timezone))
 	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
 		server.Addr = addr

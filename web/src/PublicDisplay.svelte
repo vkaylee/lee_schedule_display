@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import Icon from './Icon.svelte';
   import { statusAt } from './kiosk-time.js';
   import DisplayCanvas from './DisplayCanvas.svelte';
   import { defaultDisplayLayout } from './display-layout.js';
@@ -29,5 +30,39 @@
     return () => { clearInterval(timer); clearInterval(clockTimer); window.removeEventListener('offline', invalidate); window.removeEventListener('pagehide', invalidate); window.removeEventListener('pageshow', visibility); document.removeEventListener('visibilitychange', visibility); };
   });
 </script>
-<main><DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} />{#if error}<p role="alert">{error}</p>{/if}</main>
-<style>main{margin:0;min-height:100vh;background:#edefe8}p{padding:1rem;color:#7d261e}</style>
+<main class="public-display">
+  <DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} />
+  {#if error}
+    <p class="display-alert" role="alert">
+      <Icon name="alert" />
+      <span>{error}</span>
+    </p>
+  {/if}
+</main>
+<style>
+  .public-display {
+    position: relative;
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--display-canvas-bg, #ecefe7);
+  }
+  .display-alert {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 20;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    max-width: min(28rem, calc(100vw - 2.5rem));
+    padding: 0.85rem 1.1rem;
+    border: 1px solid var(--danger-border, #eabeb8);
+    border-left: 4px solid var(--danger, #9e2a22);
+    border-radius: var(--radius-md, 0.65rem);
+    background: var(--danger-soft, #fdf0ee);
+    color: #7d201a;
+    font-weight: 600;
+    box-shadow: var(--shadow-md, 0 10px 28px rgba(24, 44, 35, 0.16));
+  }
+</style>

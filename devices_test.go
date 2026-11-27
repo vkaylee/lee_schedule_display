@@ -22,7 +22,7 @@ func TestDeviceLanguageMigrationFromVersion6(t *testing.T) {
 	if err := migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO devices(room_id,name,token_hash) VALUES(1,'panel',X'01'); DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE devices DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; ALTER TABLE users DROP COLUMN language; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version=6"); err != nil {
+	if _, err := db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO devices(room_id,name,token_hash) VALUES(1,'panel',X'01'); DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE devices DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; ALTER TABLE users DROP COLUMN language; DROP TABLE conflict_alerts; DROP TABLE conflict_scan_status; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version=6"); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrate(db); err != nil {
@@ -44,7 +44,7 @@ func TestDeviceLanguageMigrationFromVersion6(t *testing.T) {
 	if err := db.QueryRow("SELECT language FROM devices WHERE id=1").Scan(&language); err != nil || language != "vi" {
 		t.Fatalf("language=%q error=%v", language, err)
 	}
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 11 {
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 15 {
 		t.Fatalf("version=%d error=%v", version, err)
 	}
 }
@@ -111,7 +111,7 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if _, err = db.Exec(`INSERT INTO bookings(room_id,title,organizer,private,starts,ends) VALUES(1,'secret','secret person',1,?,?),(2,'other room','other person',0,?,?)`, now, now+3600, now, now+3600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series person',1,'{}',1),(2,'other series','other series person',0,'{}',1); INSERT INTO series_occurrences(series_id,starts,ends) VALUES(1,?,?),(2,?,?)`, now+100, now+200, now+100, now+200); err != nil {
+	if _, err = db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series person',1,'{}',1),(2,'other series','other series person',0,'{}',1); INSERT INTO series_occurrences(series_id,original_starts,starts,ends) VALUES(1,?,?,?),(2,?,?,?)`, now+100, now+100, now+200, now+100, now+100, now+200); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("a", 43)
