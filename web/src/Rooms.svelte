@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  let { csrf } = $props();
+  let { csrf, language = 'vi' } = $props();
+  const t = (vi, en) => language === 'en' ? en : vi;
   let rooms = $state([]);
   let loading = $state(true);
   let busy = $state(false);
@@ -19,7 +20,7 @@
       const response = await fetch('/api/rooms', { cache: 'no-store' });
       if (!response.ok) throw new Error();
       rooms = await response.json();
-    } catch { error = 'Không thể tải danh sách phòng.'; }
+    } catch { error = t('Không thể tải danh sách phòng.', 'Could not load rooms.'); }
     finally { loading = false; }
   }
   function edit(room) {
@@ -33,47 +34,47 @@
   function clear() { editing = null; name = ''; active = true; showTitle = false; showOrganizer = false; }
   async function save(event) {
     event.preventDefault();
-    if (new TextEncoder().encode(name.trim()).length > 128) { error = 'Tên phòng không được vượt quá 128 byte UTF-8.'; return; }
-    if (editing && !active && !window.confirm('Vô hiệu hóa phòng này? Dữ liệu lịch sẽ được giữ lại.')) return;
+    if (new TextEncoder().encode(name.trim()).length > 128) { error = t('Tên phòng không được vượt quá 128 byte UTF-8.', 'Room name must not exceed 128 UTF-8 bytes.'); return; }
+    if (editing && !active && !window.confirm(t('Vô hiệu hóa phòng này? Dữ liệu lịch sẽ được giữ lại.', 'Disable this room? Booking data will be retained.'))) return;
     busy = true; error = ''; notice = '';
     try {
       const response = await fetch(editing ? `/api/rooms/${editing}` : '/api/rooms', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({ name: name.trim(), active, show_title: showTitle, show_organizer: showOrganizer }),
       });
-      if (response.status === 409) { error = 'Tên phòng đã tồn tại.'; return; }
+      if (response.status === 409) { error = t('Tên phòng đã tồn tại.', 'Room name already exists.'); return; }
       if (!response.ok) throw new Error();
-      clear(); await load(); notice = 'Đã lưu phòng.';
-    } catch { error = 'Không thể lưu phòng. Vui lòng thử lại.'; }
+      clear(); await load(); notice = t('Đã lưu phòng.', 'Room saved.');
+    } catch { error = t('Không thể lưu phòng. Vui lòng thử lại.', 'Could not save room. Please try again.'); }
     finally { busy = false; }
   }
   onMount(load);
 </script>
 
 <section aria-labelledby="rooms-heading">
-  <h2 id="rooms-heading">Quản lý phòng</h2>
+  <h2 id="rooms-heading">{t('Quản lý phòng', 'Room management')}</h2>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
-  {#if loading}<p role="status">Đang tải phòng…</p>
-  {:else if rooms.length === 0}<p>Chưa có phòng.</p>
+  {#if loading}<p role="status">{t('Đang tải phòng…', 'Loading rooms…')}</p>
+  {:else if rooms.length === 0}<p>{t('Chưa có phòng.', 'No rooms yet.')}</p>
   {:else}
     <ul>
       {#each rooms as room (room.id)}
-        <li>{room.name} — {room.active ? 'Đang hoạt động' : 'Đã vô hiệu hóa'}
-          <button type="button" disabled={busy} aria-label={`Sửa phòng ${room.name}`} onclick={() => edit(room)}>Sửa</button>
+        <li>{room.name} — {room.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
+          <button type="button" disabled={busy} aria-label={`${t('Sửa phòng', 'Edit room')} ${room.name}`} onclick={() => edit(room)}>{t('Sửa', 'Edit')}</button>
         </li>
       {/each}
     </ul>
   {/if}
   <form onsubmit={save}>
-    <h3>{editing ? 'Sửa phòng' : 'Tạo phòng'}</h3>
-    <label for="room-name">Tên phòng</label>
+    <h3>{editing ? t('Sửa phòng', 'Edit room') : t('Tạo phòng', 'Create room')}</h3>
+    <label for="room-name">{t('Tên phòng', 'Room name')}</label>
     <input id="room-name" bind:value={name} maxlength="128" required />
-    {#if editing}<label><input type="checkbox" bind:checked={active} /> Đang hoạt động</label>{/if}
-    <label><input type="checkbox" bind:checked={showTitle} /> Hiển thị tiêu đề trên màn hình</label>
-    <label><input type="checkbox" bind:checked={showOrganizer} /> Hiển thị người tổ chức trên màn hình</label>
-    <button type="submit" disabled={busy}>Lưu phòng</button>
-    {#if editing}<button type="button" disabled={busy} onclick={clear}>Hủy</button>{/if}
+    {#if editing}<label><input type="checkbox" bind:checked={active} /> {t('Đang hoạt động', 'Active')}</label>{/if}
+    <label><input type="checkbox" bind:checked={showTitle} /> {t('Hiển thị tiêu đề trên màn hình', 'Show title on display')}</label>
+    <label><input type="checkbox" bind:checked={showOrganizer} /> {t('Hiển thị người tổ chức trên màn hình', 'Show organizer on display')}</label>
+    <button type="submit" disabled={busy}>{t('Lưu phòng', 'Save room')}</button>
+    {#if editing}<button type="button" disabled={busy} onclick={clear}>{t('Hủy', 'Cancel')}</button>{/if}
   </form>
 </section>
 <style>

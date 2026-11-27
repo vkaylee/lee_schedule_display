@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 7 {
+	if version > 8 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -79,6 +79,12 @@ PRAGMA user_version = 6`); err != nil {
 	if version <= 6 {
 		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
 PRAGMA user_version = 7`); err != nil {
+			return err
+		}
+	}
+	if version <= 7 {
+		if _, err := tx.Exec(`ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
+PRAGMA user_version = 8`); err != nil {
 			return err
 		}
 	}
@@ -245,8 +251,13 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: "__Host-session", Value: token, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(sessionDuration.Seconds())})
+		var language string
+		if err := db.QueryRow("SELECT language FROM users WHERE id = ?", id).Scan(&language); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"username": input.Username, "csrf_token": csrf})
+		json.NewEncoder(w).Encode(map[string]string{"username": input.Username, "csrf_token": csrf, "language": language})
 	}))
 	session := func(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -273,9 +284,43 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 		if !ok {
 			return
 		}
+		var language string
+		if err := db.QueryRow("SELECT language FROM users WHERE username = ? AND active = 1", username).Scan(&language); err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"username": username, "csrf_token": csrf})
+		json.NewEncoder(w).Encode(map[string]string{"username": username, "csrf_token": csrf, "language": language})
 	})
+	mux.HandleFunc("PUT /api/session/language", post(func(w http.ResponseWriter, r *http.Request) {
+		token, _, csrf, ok := session(w, r)
+		if !ok {
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(csrf), []byte(r.Header.Get("X-CSRF-Token"))) != 1 {
+			http.Error(w, "forbidden", 403)
+			return
+		}
+		var input struct {
+			Language string `json:"language"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en") {
+			http.Error(w, "invalid request", 400)
+			return
+		}
+		result, err := db.Exec("UPDATE users SET language = ? WHERE active = 1 AND id = (SELECT user_id FROM sessions WHERE token_hash = ? AND expires > ?)", input.Language, tokenHash(token), time.Now().Unix())
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
 	mux.HandleFunc("POST /api/logout", post(func(w http.ResponseWriter, r *http.Request) {
 		token, _, csrf, ok := session(w, r)
 		if !ok {

@@ -13,6 +13,37 @@ import (
 	"time"
 )
 
+func TestAccountLanguageMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE users DROP COLUMN language; PRAGMA user_version = 7;
+INSERT INTO users(username,salt,password_hash) VALUES('existing',X'01',X'02');
+INSERT INTO rooms(name) VALUES('room');
+INSERT INTO devices(room_id,name,token_hash,language) VALUES(1,'device',X'03','en')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var accountLanguage, deviceLanguage string
+	if err := db.QueryRow(`SELECT users.language, devices.language FROM users, devices`).Scan(&accountLanguage, &deviceLanguage); err != nil {
+		t.Fatal(err)
+	}
+	if accountLanguage != "vi" || deviceLanguage != "en" {
+		t.Fatalf("languages: %q %q", accountLanguage, deviceLanguage)
+	}
+	if _, err := db.Exec(`UPDATE users SET language = 'fr'`); err == nil {
+		t.Fatal("invalid language accepted")
+	}
+}
+
 func TestUserManagement(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -55,6 +86,30 @@ func TestUserManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie := login.Result().Cookies()[0]
+	crossOrigin := httptest.NewRequest("PUT", "https://example.test/api/session/language", strings.NewReader(`{"language":"en"}`))
+	crossOrigin.Header.Set("Origin", "https://evil.test")
+	crossOrigin.Header.Set("X-CSRF-Token", session.CSRF)
+	crossOrigin.AddCookie(cookie)
+	blocked := httptest.NewRecorder()
+	h.ServeHTTP(blocked, crossOrigin)
+	if blocked.Code != 403 {
+		t.Fatal(blocked.Code)
+	}
+	if w := request("PUT", "/api/session/language", `{"language":"en"}`, nil, ""); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	if w := request("PUT", "/api/session/language", `{"language":"en"}`, cookie, "wrong"); w.Code != 403 {
+		t.Fatal(w.Code)
+	}
+	if w := request("PUT", "/api/session/language", `{"language":"fr"}`, cookie, session.CSRF); w.Code != 400 {
+		t.Fatal(w.Code)
+	}
+	if w := request("PUT", "/api/session/language", `{"language":"en"}`, cookie, session.CSRF); w.Code != 204 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := request("GET", "/api/session", "", cookie, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
 	if w := request("POST", "/api/users", `{"username":"other","password":"long-password-456"}`, cookie, "wrong"); w.Code != 403 {
 		t.Fatal(w.Code)
 	}

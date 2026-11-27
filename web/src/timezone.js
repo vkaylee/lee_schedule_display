@@ -8,7 +8,7 @@ export function localTime(epoch, zone) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 export function instant(local, zone) {
-  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;
+  if (!zone || !/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;
   const nominal = Date.parse(local + ':00Z');
   if (!Number.isFinite(nominal)) return null;
   const offsets = new Set();

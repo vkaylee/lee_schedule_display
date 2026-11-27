@@ -5,6 +5,8 @@
   import Devices from './Devices.svelte';
   import Kiosk from './Kiosk.svelte';
 
+  let t;
+  $: t = session?.language === 'en' ? (_vi, en) => en : (vi, _en) => vi;
   let username = '';
   let password = '';
   let session = null;
@@ -30,7 +32,7 @@
       const result = await response.json();
       if (session === currentSession) users = result;
     } catch {
-      if (session === currentSession) usersError = 'Không thể tải danh sách tài khoản. Vui lòng thử lại.';
+      if (session === currentSession) usersError = t('Không thể tải danh sách tài khoản. Vui lòng thử lại.', 'Could not load accounts. Please try again.');
     } finally {
       if (session === currentSession) usersLoading = false;
     }
@@ -50,13 +52,13 @@
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (response.status === 409 && path.endsWith('/disable')) {
-        usersError = 'Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.';
+        usersError = t('Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.', 'Cannot disable the last active account.');
         return false;
       }
       if (response.status !== 201 && response.status !== 204) throw new Error();
       return true;
     } catch {
-      usersError = 'Không thể thực hiện thao tác. Vui lòng thử lại.';
+      usersError = t('Không thể thực hiện thao tác. Vui lòng thử lại.', 'Could not complete the operation. Please try again.');
       return false;
     } finally {
       busy = false;
@@ -69,20 +71,20 @@
     if (await updateUser('/api/users', { username: newUsername.trim(), password: newPassword })) {
       newUsername = '';
       newPassword = '';
-      notice = 'Đã tạo tài khoản.';
+      notice = t('Đã tạo tài khoản.', 'Account created.');
       await loadUsers();
     }
   }
 
   async function disableUser(user) {
-    if (!window.confirm(`Vô hiệu hóa tài khoản "${user.username}"? Tài khoản này sẽ không thể đăng nhập.`)) return;
+    if (!window.confirm(t(`Vô hiệu hóa tài khoản "${user.username}"? Tài khoản này sẽ không thể đăng nhập.`, `Disable account "${user.username}"? This account will no longer be able to sign in.`))) return;
     if (await updateUser(`/api/users/${encodeURIComponent(user.id)}/disable`)) {
       if (user.username === session.username) {
         await logout();
         return;
       }
       if (resetUser?.id === user.id) cancelReset();
-      notice = 'Đã vô hiệu hóa tài khoản.';
+      notice = t('Đã vô hiệu hóa tài khoản.', 'Account disabled.');
       await loadUsers();
     }
   }
@@ -101,7 +103,7 @@
         return;
       }
       cancelReset();
-      notice = 'Đã đặt lại mật khẩu.';
+      notice = t('Đã đặt lại mật khẩu.', 'Password reset.');
     }
   }
 
@@ -114,9 +116,9 @@
         session = await response.json();
         await loadUsers();
       }
-      else if (response.status !== 401) error = 'Không thể kiểm tra phiên đăng nhập. Vui lòng thử lại.';
+      else if (response.status !== 401) error = t('Không thể kiểm tra phiên đăng nhập. Vui lòng thử lại.', 'Could not check your session. Please try again.');
     } catch {
-      error = 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
     } finally {
       loading = false;
     }
@@ -137,17 +139,36 @@
         password = '';
         await loadUsers();
       } else if (response.status === 401) {
-        error = 'Tên đăng nhập hoặc mật khẩu không đúng.';
+        error = t('Tên đăng nhập hoặc mật khẩu không đúng.', 'Invalid username or password.');
       } else if (response.status === 429) {
-        error = 'Quá nhiều lần đăng nhập. Vui lòng thử lại sau.';
+        error = t('Quá nhiều lần đăng nhập. Vui lòng thử lại sau.', 'Too many login attempts. Please try again later.');
       } else {
-        error = 'Không thể đăng nhập. Vui lòng thử lại.';
+        error = t('Không thể đăng nhập. Vui lòng thử lại.', 'Could not log in. Please try again.');
       }
     } catch {
-      error = 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
     } finally {
       busy = false;
     }
+  }
+
+  async function changeLanguage(event) {
+    const select = event.currentTarget;
+    const language = select.value;
+    busy = true;
+    error = '';
+    try {
+      const response = await fetch('/api/session/language', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf_token },
+        body: JSON.stringify({ language }),
+      });
+      if (!response.ok) throw new Error();
+      session = { ...session, language };
+    } catch {
+      select.value = session.language;
+      error = session.language === 'en' ? 'Could not save language. Please try again.' : 'Không thể lưu ngôn ngữ. Vui lòng thử lại.';
+    } finally { busy = false; }
   }
 
   async function logout() {
@@ -169,10 +190,10 @@
         username = '';
         password = '';
       } else {
-        error = 'Không thể đăng xuất. Vui lòng thử lại.';
+        error = t('Không thể đăng xuất. Vui lòng thử lại.', 'Could not log out. Please try again.');
       }
     } catch {
-      error = 'Không thể kết nối máy chủ. Vui lòng thử lại.';
+      error = t('Không thể kết nối máy chủ. Vui lòng thử lại.', 'Could not connect to the server. Please try again.');
     } finally {
       busy = false;
     }
@@ -181,7 +202,7 @@
   if (window.location.pathname !== '/kiosk') onMount(loadSession);
 </script>
 
-<svelte:head><title>Quản lý lịch phòng họp</title></svelte:head>
+<svelte:head><title>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</title></svelte:head>
 
 {#if window.location.pathname === '/kiosk'}
   <Kiosk />
@@ -190,37 +211,41 @@
   <div class="panel">
     <p class="eyebrow">SCHEDULE DISPLAY</p>
     {#if loading}
-      <h1>Quản lý lịch phòng họp</h1>
-      <p role="status">Đang kiểm tra phiên đăng nhập…</p>
+      <h1>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</h1>
+      <p role="status">{t('Đang kiểm tra phiên đăng nhập…', 'Checking session…')}</p>
     {:else if session}
-      <h1>Quản lý lịch phòng họp</h1>
-      <p>Đã đăng nhập: <strong>{session.username}</strong></p>
+      <h1>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</h1>
+      <p>{t('Đã đăng nhập:', 'Signed in:')} <strong>{session.username}</strong></p>
       {#if error}<p class="error" role="alert">{error}</p>{/if}
-      <button type="button" onclick={logout} disabled={busy}>Đăng xuất</button>
-      <Rooms csrf={session.csrf_token} />
-      <Bookings csrf={session.csrf_token} />
-      <Devices csrf={session.csrf_token} />
+      <label for="account-language">Ngôn ngữ / Language</label>
+      <select id="account-language" value={session.language} onchange={changeLanguage} disabled={busy}>
+        <option value="vi">Tiếng Việt</option><option value="en">English</option>
+      </select>
+      <button type="button" onclick={logout} disabled={busy}>{t('Đăng xuất', 'Log out')}</button>
+      <Rooms csrf={session.csrf_token} language={session.language} />
+      <Bookings csrf={session.csrf_token} language={session.language} />
+      <Devices csrf={session.csrf_token} language={session.language} />
       <section aria-labelledby="users-heading">
-        <h2 id="users-heading">Quản lý tài khoản</h2>
-        <p>Quản lý quyền truy cập và mật khẩu đăng nhập.</p>
+        <h2 id="users-heading">{t('Quản lý tài khoản', 'Account management')}</h2>
+        <p>{t('Quản lý quyền truy cập và mật khẩu đăng nhập.', 'Manage access and login passwords.')}</p>
         {#if usersError}<p class="error" role="alert">{usersError}</p>{/if}
         {#if notice}<p class="notice" role="status">{notice}</p>{/if}
-        <h3>Danh sách tài khoản</h3>
+        <h3>{t('Danh sách tài khoản', 'Accounts')}</h3>
         {#if usersLoading}
-          <p role="status">Đang tải danh sách tài khoản…</p>
+          <p role="status">{t('Đang tải danh sách tài khoản…', 'Loading accounts…')}</p>
         {:else if usersError && users.length === 0}
-          <button class="secondary" type="button" onclick={loadUsers}>Thử tải lại</button>
+          <button class="secondary" type="button" onclick={loadUsers}>{t('Thử tải lại', 'Retry')}</button>
         {:else if users.length === 0}
-          <p>Chưa có tài khoản nào.</p>
+          <p>{t('Chưa có tài khoản nào.', 'No accounts yet.')}</p>
         {:else}
           <ul class="users">
             {#each users as user (user.id)}
               <li>
-                <div><strong>{user.username}</strong><br /><span class="state">{user.active ? 'Đang hoạt động' : 'Đã vô hiệu hóa'}</span></div>
+                <div><strong>{user.username}</strong><br /><span class="state">{user.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}</span></div>
                 {#if user.active}
                   <div class="actions">
-                    <button class="secondary" type="button" disabled={busy} aria-label={`Đặt lại mật khẩu cho ${user.username}`} onclick={() => { cancelReset(); resetUser = user; }}>Đặt lại mật khẩu</button>
-                    <button class="danger" type="button" disabled={busy} aria-label={`Vô hiệu hóa ${user.username}`} onclick={() => disableUser(user)}>Vô hiệu hóa</button>
+                    <button class="secondary" type="button" disabled={busy} aria-label={`${t('Đặt lại mật khẩu cho', 'Reset password for')} ${user.username}`} onclick={() => { cancelReset(); resetUser = user; }}>{t('Đặt lại mật khẩu', 'Reset password')}</button>
+                    <button class="danger" type="button" disabled={busy} aria-label={`${t('Vô hiệu hóa', 'Disable')} ${user.username}`} onclick={() => disableUser(user)}>{t('Vô hiệu hóa', 'Disable')}</button>
                   </div>
                 {/if}
               </li>
@@ -229,36 +254,36 @@
         {/if}
         {#if resetUser}
           <form onsubmit={changePassword}>
-            <h3>Đặt lại mật khẩu cho {resetUser.username}</h3>
-            <label for="reset-password">Mật khẩu mới</label>
+            <h3>{t('Đặt lại mật khẩu cho', 'Reset password for')} {resetUser.username}</h3>
+            <label for="reset-password">{t('Mật khẩu mới', 'New password')}</label>
             <input id="reset-password" name="new-password" type="password" autocomplete="new-password" bind:value={resetPassword} required maxlength="1024" />
             <div class="actions">
-              <button type="submit" disabled={busy}>Lưu mật khẩu</button>
-              <button class="secondary" type="button" disabled={busy} onclick={cancelReset}>Hủy</button>
+              <button type="submit" disabled={busy}>{t('Lưu mật khẩu', 'Save password')}</button>
+              <button class="secondary" type="button" disabled={busy} onclick={cancelReset}>{t('Hủy', 'Cancel')}</button>
             </div>
           </form>
         {/if}
         <form onsubmit={createUser}>
-          <h3>Tạo tài khoản</h3>
-          <label for="new-username">Tên đăng nhập</label>
+          <h3>{t('Tạo tài khoản', 'Create account')}</h3>
+          <label for="new-username">{t('Tên đăng nhập', 'Username')}</label>
           <input id="new-username" name="new-username" autocomplete="off" bind:value={newUsername} required maxlength="128" />
-          <label for="new-password">Mật khẩu</label>
+          <label for="new-password">{t('Mật khẩu', 'Password')}</label>
           <input id="new-password" name="new-password" type="password" autocomplete="new-password" bind:value={newPassword} required maxlength="1024" />
-          <button type="submit" disabled={busy}>Tạo tài khoản</button>
+          <button type="submit" disabled={busy}>{t('Tạo tài khoản', 'Create account')}</button>
         </form>
       </section>
     {:else}
-      <h1>Đăng nhập quản trị</h1>
-      <p>Đăng nhập để quản lý lịch phòng họp.</p>
+      <h1>{t('Đăng nhập quản trị', 'Administrator login')}</h1>
+      <p>{t('Đăng nhập để quản lý lịch phòng họp.', 'Sign in to manage room schedules.')}</p>
       {#if error}<p class="error" role="alert">{error}</p>{/if}
       <form onsubmit={login}>
-        <label for="username">Tên đăng nhập</label>
+        <label for="username">{t('Tên đăng nhập', 'Username')}</label>
         <input id="username" name="username" autocomplete="username" bind:value={username} required maxlength="128" />
-        <label for="password">Mật khẩu</label>
+        <label for="password">{t('Mật khẩu', 'Password')}</label>
         <input id="password" name="password" type="password" autocomplete="current-password" bind:value={password} required maxlength="1024" />
-        <button type="submit" disabled={busy}>{busy ? 'Đang đăng nhập…' : 'Đăng nhập'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('Đang đăng nhập…', 'Signing in…') : t('Đăng nhập', 'Sign in')}</button>
       </form>
-      {#if error}<button class="secondary" type="button" onclick={loadSession}>Kiểm tra kết nối</button>{/if}
+      {#if error}<button class="secondary" type="button" onclick={loadSession}>{t('Kiểm tra kết nối', 'Check connection')}</button>{/if}
     {/if}
   </div>
 </main>
