@@ -23,6 +23,36 @@
   let newPassword = '';
   let resetUser = null;
   let resetPassword = '';
+  const views = ['overview', 'rooms', 'bookings', 'devices', 'users'];
+  let activeView = views.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'overview';
+  let overview = null;
+  let overviewError = false;
+  let overviewLoading = false;
+  let overviewRequest = 0;
+
+  async function loadOverview() {
+    const request = ++overviewRequest;
+    overviewLoading = true;
+    overviewError = false;
+    try {
+      const responses = await Promise.all(['/api/rooms', '/api/bookings', '/api/devices'].map(url => fetch(url, { cache: 'no-store' })));
+      if (responses.some(response => !response.ok)) throw new Error();
+      const [rooms, bookings, devices] = await Promise.all(responses.map(response => response.json()));
+      if (request === overviewRequest) overview = { rooms, bookings, devices };
+    } catch {
+      if (request === overviewRequest) overviewError = true;
+    } finally {
+      if (request === overviewRequest) overviewLoading = false;
+    }
+  }
+
+  $: if (session && activeView === 'overview') loadOverview();
+
+  onMount(() => {
+    const syncView = () => { const view = window.location.hash.slice(1); if (views.includes(view)) activeView = view; };
+    window.addEventListener('hashchange', syncView);
+    return () => window.removeEventListener('hashchange', syncView);
+  });
 
   async function loadUsers() {
     const currentSession = session;
@@ -228,13 +258,28 @@
       </select>
       <button class="secondary logout" type="button" onclick={logout} disabled={busy}>{t('Đăng xuất', 'Log out')}</button></div></header>
       <nav class="workspace-nav" aria-label={t('Điều hướng quản trị', 'Workspace navigation')}>
-        <a href="#rooms-heading">{t('Phòng', 'Rooms')}</a><a href="#bookings-heading">{t('Lịch phòng', 'Bookings')}</a><a href="#device-heading">{t('Thiết bị', 'Devices')}</a><a href="#users-heading">{t('Tài khoản', 'Accounts')}</a>
+        <a href="#overview" aria-current={activeView === 'overview' ? 'page' : undefined}>{t('Tổng quan', 'Overview')}</a><a href="#rooms" aria-current={activeView === 'rooms' ? 'page' : undefined}>{t('Phòng', 'Rooms')}</a><a href="#bookings" aria-current={activeView === 'bookings' ? 'page' : undefined}>{t('Lịch phòng', 'Bookings')}</a><a href="#devices" aria-current={activeView === 'devices' ? 'page' : undefined}>{t('Thiết bị', 'Devices')}</a><a href="#users" aria-current={activeView === 'users' ? 'page' : undefined}>{t('Tài khoản', 'Accounts')}</a>
       </nav>
       <div class="workspace-content">
-      <Rooms csrf={session.csrf_token} language={session.language} />
-      <Bookings csrf={session.csrf_token} language={session.language} />
-      <Devices csrf={session.csrf_token} language={session.language} />
-      <section aria-labelledby="users-heading">
+      {#if activeView === 'overview'}
+        <section class="overview" aria-labelledby="overview-heading">
+          <div class="overview-header"><div><p class="section-kicker">{t('KHÔNG GIAN CỦA BẠN', 'YOUR WORKSPACE')}</p><h2 id="overview-heading">{t('Tổng quan', 'Overview')}</h2><p>{t('Theo dõi phòng, lịch và thiết bị từ một nơi.', 'Keep track of rooms, bookings, and devices in one place.')}</p></div><button class="secondary" type="button" onclick={loadOverview} disabled={overviewLoading}>{t('Làm mới', 'Refresh')}</button></div>
+          {#if overviewLoading}<p role="status">{t('Đang tải tổng quan…', 'Loading overview…')}</p>{/if}
+          {#if overviewError}<p class="error" role="alert">{t('Không thể tải tổng quan. Vui lòng thử lại.', 'Could not load the overview. Please try again.')}</p>{/if}
+          {#if overview && !overviewError}
+            <div class="overview-grid">
+              <article><p class="overview-label">{t('PHÒNG HOẠT ĐỘNG', 'ACTIVE ROOMS')}</p><strong>{overview.rooms.filter(room => room.active).length}</strong><p>{t('Phòng sẵn sàng quản lý', 'Rooms available to manage')}</p><a href="#rooms">{t('Quản lý phòng', 'Manage rooms')} <span aria-hidden="true">→</span></a></article>
+              <article><p class="overview-label">{t('LỊCH SẮP TỚI', 'UPCOMING BOOKINGS')}</p><strong>{overview.bookings.filter(booking => !booking.canceled && booking.starts * 1000 > Date.now()).length}</strong><p>{t('Lịch chưa bắt đầu', 'Bookings yet to start')}</p><a href="#bookings">{t('Xem lịch phòng', 'View bookings')} <span aria-hidden="true">→</span></a></article>
+              <article><p class="overview-label">{t('THIẾT BỊ HOẠT ĐỘNG', 'ACTIVE DEVICES')}</p><strong>{overview.devices.filter(device => !device.revoked).length}</strong><p>{t('Thiết bị chưa bị thu hồi', 'Devices not revoked')}</p><a href="#devices">{t('Quản lý thiết bị', 'Manage devices')} <span aria-hidden="true">→</span></a></article>
+            </div>
+            <div class="overview-next"><div><h3>{t('Bắt đầu từ đâu?', 'Where to start?')}</h3><p>{overview.rooms.some(room => room.active) ? t('Tạo lịch cho phòng hoặc thiết lập màn hình hiển thị.', 'Create a booking or set up a room display.') : t('Tạo phòng đầu tiên, sau đó thêm lịch và thiết bị hiển thị.', 'Create your first room, then add bookings and displays.')}</p></div><a class="overview-action" href={overview.rooms.some(room => room.active) ? '#bookings' : '#rooms'}>{overview.rooms.some(room => room.active) ? t('Tạo lịch', 'Create booking') : t('Tạo phòng', 'Create room')} <span aria-hidden="true">→</span></a></div>
+          {/if}
+        </section>
+      {/if}
+      <div class="view" hidden={activeView !== 'rooms'}><Rooms csrf={session.csrf_token} language={session.language} /></div>
+      <div class="view" hidden={activeView !== 'bookings'}><Bookings csrf={session.csrf_token} language={session.language} /></div>
+      <div class="view" hidden={activeView !== 'devices'}><Devices csrf={session.csrf_token} language={session.language} /></div>
+      <section hidden={activeView !== 'users'} aria-labelledby="users-heading">
         <h2 id="users-heading">{t('Quản lý tài khoản', 'Account management')}</h2>
         <p>{t('Quản lý quyền truy cập và mật khẩu đăng nhập.', 'Manage access and login passwords.')}</p>
         {#if usersError}<p class="error" role="alert">{t(...usersError)}</p>{/if}
@@ -342,8 +387,22 @@
   .account-bar .logout { margin: 0; }
   .workspace-nav { display: flex; gap: .25rem; overflow-x: auto; border-bottom: 1px solid #d6ded4; }
   .workspace-nav a { color: #4c6558; text-decoration: none; white-space: nowrap; padding: .95rem 1.2rem; font-weight: 650; border-bottom: 3px solid transparent; }
-  .workspace-nav a:hover, .workspace-nav a:focus-visible { color: #185739; border-bottom-color: #397758; }
-  .workspace-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: start; padding-block: 1.5rem 4rem; }
+  .workspace-nav a:hover, .workspace-nav a:focus-visible, .workspace-nav a[aria-current='page'] { color: #185739; border-bottom-color: #397758; }
+  .workspace-content { padding-block: 1.5rem 4rem; }
+  .view[hidden], .workspace-content > section[hidden] { display: none; }
+  .overview-header, .overview-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+  .overview-header p, .overview-next p { margin: .5rem 0 0; }
+  .overview-header button.secondary { margin: 0; color: #155c3f; background: transparent; }
+  .overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-block: 1.75rem; }
+  .overview-grid article { padding: 1.5rem; background: #f5f7f1; border: 1px solid #e1e8dd; border-radius: .65rem; }
+  .overview-grid .overview-label { margin: 0; font-size: .72rem; font-weight: 700; letter-spacing: .1em; }
+  .overview-grid strong { display: block; margin-top: .8rem; font-size: 2.5rem; line-height: 1.1; color: #234b37; font-variant-numeric: tabular-nums; }
+  .overview-grid article p:not(.overview-label) { margin: .5rem 0 1.25rem; }
+  .overview-grid a, .overview-action { color: #155c3f; font-weight: 700; text-decoration: none; }
+  .overview-grid a:hover, .overview-action:hover { text-decoration: underline; }
+  .overview-next { padding: 1.4rem 1.5rem; border: 1px solid #d8e6d7; background: #edf5eb; border-radius: .65rem; }
+  .overview-next h3 { margin: 0; }
+  @media (max-width: 760px) { .overview-grid { grid-template-columns: 1fr; } }
   .workspace-content :global(section[aria-labelledby]) { min-width: 0; margin: 0; padding: 1.75rem; border: 1px solid #e0e5dc; border-radius: .85rem; background: #fffefa; box-shadow: 0 6px 24px #304b3b0b; scroll-margin-top: 1rem; }
   .workspace-content :global(section[aria-labelledby='device-heading']) { grid-column: 1 / -1; }
   .workspace-content :global(h2) { margin: 0 0 .75rem; color: #263f33; font-size: 1.3rem; letter-spacing: -.02em; }
