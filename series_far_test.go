@@ -273,14 +273,14 @@ func TestSeriesMigrationVersion10(t *testing.T) {
 	if err = migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'old','admin',0,'{}',1); DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); ALTER TABLE booking_series DROP COLUMN checked_through; DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; PRAGMA user_version=10`); err != nil {
+	if _, err = db.Exec(`INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'old','admin',0,'{}',1); DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; PRAGMA user_version=10`); err != nil {
 		t.Fatal(err)
 	}
 	if err = migrate(db); err != nil {
 		t.Fatal(err)
 	}
 	var horizon, count, version int
-	if err = db.QueryRow("SELECT checked_through,(SELECT COUNT(*) FROM series_occurrences), (SELECT user_version FROM pragma_user_version) FROM booking_series WHERE id=1").Scan(&horizon, &count, &version); err != nil || horizon != 400 || count != 2 || version != 15 {
+	if err = db.QueryRow("SELECT checked_through,(SELECT COUNT(*) FROM series_occurrences), (SELECT user_version FROM pragma_user_version) FROM booking_series WHERE id=1").Scan(&horizon, &count, &version); err != nil || horizon != 400 || count != 2 || version != 16 {
 		t.Fatalf("migration horizon=%d count=%d version=%d err=%v", horizon, count, version, err)
 	}
 	if err = migrate(db); err != nil {

@@ -139,7 +139,7 @@ func registerBookingHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 					return
 				}
 				var conflict bool
-				err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND id!=? AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.starts<? AND o.ends>?)`, b.RoomID, id, b.Ends, b.Starts, b.RoomID, b.Ends, b.Starts).Scan(&conflict)
+				err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND id!=? AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.starts<? AND o.ends>?)`, b.RoomID, id, b.Ends, b.Starts, b.RoomID, b.Ends, b.Starts).Scan(&conflict)
 				if err != nil {
 					http.Error(w, "internal error", 500)
 					return

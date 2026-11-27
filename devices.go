@@ -246,7 +246,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			http.Error(w, "internal error", 500)
 			return
 		}
-		rows, err := tx.Query("SELECT starts,ends,private,title,organizer FROM (SELECT starts,ends,private,title,organizer FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends,COALESCE(o.private,s.private),COALESCE(o.title,s.title),COALESCE(o.organizer,s.organizer) FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
+		rows, err := tx.Query("SELECT starts,ends,private,title,organizer FROM (SELECT starts,ends,private,title,organizer FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends,COALESCE(o.private,s.private),COALESCE(o.title,s.title),COALESCE(o.organizer,s.organizer) FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return

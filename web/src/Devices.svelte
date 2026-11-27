@@ -100,7 +100,7 @@
   {/if}
 
   {#if editing}
-    <DisplayEditor device={editing} {csrf} onclose={() => editing = null} />
+    <DisplayEditor device={editing} {csrf} {language} onclose={() => editing = null} />
   {/if}
 
   <div class="ui-split">

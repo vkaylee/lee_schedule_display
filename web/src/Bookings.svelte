@@ -12,6 +12,8 @@
   let repeatWeekdays = $state([]), repeatMonthMode = $state('day'), repeatMonthDay = $state(1), repeatNth = $state(1), repeatNthWeekday = $state(1);
   let originalStart = 0, originalEnd = 0, originalStartText = '', originalEndText = '';
   let occurrenceTarget = $state(null);
+  let seriesEdit = $state(null);
+  let seriesDuration = 0, seriesStartText = '', seriesEndText = '';
   let id = $state(null), version = $state(0), roomId = $state(''), title = $state(''), organizer = $state(''), isPrivate = $state(false), starts = $state(''), ends = $state('');
   async function load() {
     try {
@@ -27,13 +29,67 @@
     catch { error = ['Không thể xác nhận cảnh báo.', 'Could not acknowledge alert.']; }
     finally { busy = false; }
   }
-  function clear() { occurrenceTarget = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false; starts = ''; ends = ''; }
+  function clear() { occurrenceTarget = null; seriesEdit = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false; starts = ''; ends = ''; }
   function edit(b) {
     error = '';
-    occurrenceTarget = null; id = b.id; version = b.version; roomId = String(b.room_id); title = b.title; organizer = b.organizer; isPrivate = b.private;
+    occurrenceTarget = null; seriesEdit = null; id = b.id; version = b.version; roomId = String(b.room_id); title = b.title; organizer = b.organizer; isPrivate = b.private;
     starts = localTimeSeconds(b.starts, zone);
     ends = localTimeSeconds(b.ends, zone);
     originalStart = b.starts; originalEnd = b.ends; originalStartText = starts; originalEndText = ends;
+  }
+  function editSeries(s, scope, occurrence = null) {
+    error = ''; notice = ''; occurrenceTarget = null; id = null;
+    const rule = s.rule.rule;
+    const durSec = Math.max(1, Math.round(rule.Duration / 1e9));
+    const baseStart = scope === 'from' && occurrence ? occurrence.original_starts : Math.round(Date.parse(rule.Start) / 1000);
+    roomId = String(s.room_id); title = s.title; organizer = s.organizer; isPrivate = s.private;
+    starts = localTimeSeconds(baseStart, zone);
+    ends = localTimeSeconds(baseStart + durSec, zone);
+    seriesDuration = durSec; seriesStartText = starts; seriesEndText = ends;
+    repeatFrequency = rule.Frequency; repeatInterval = rule.Interval;
+    repeatWeekdays = rule.Weekdays ?? [];
+    if (rule.Frequency === 3) {
+      repeatMonthMode = rule.MonthDay ? 'day' : 'nth';
+      repeatMonthDay = rule.MonthDay || 1;
+      repeatNth = rule.Nth || 1;
+      repeatNthWeekday = rule.NthWeekday ?? 1;
+    }
+    if (rule.Count > 0) {
+      repeatEnd = 'count';
+      if (scope === 'from' && occurrence) {
+        const remaining = s.occurrences.filter(o => o.original_starts >= occurrence.original_starts).length;
+        repeatCount = Math.max(1, remaining);
+      } else {
+        repeatCount = rule.Count;
+      }
+      repeatUntil = '';
+    } else if (!rule.Until.startsWith('0001-01-01')) {
+      repeatEnd = 'until'; repeatUntil = rule.Until.slice(0, 10);
+    } else {
+      repeatEnd = 'infinite'; repeatUntil = '';
+    }
+    seriesEdit = { id: s.id, version: s.version, scope, originalStarts: occurrence ? occurrence.original_starts : null };
+  }
+  async function cancelSeries(s, scope, originalStarts = null) {
+    const prompt = scope === 'all'
+      ? t('Hủy toàn bộ chuỗi này?', 'Cancel this entire series?')
+      : t('Hủy chuỗi từ buổi này trở đi?', 'Cancel this and all following occurrences?');
+    if (!window.confirm(prompt)) return;
+    busy = true; error = ''; notice = '';
+    try {
+      const body = scope === 'all' ? { scope: 'all' } : { scope: 'from', original_starts: originalStarts };
+      const response = await fetch(`/api/series/${s.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'If-Match': String(s.version) },
+        body: JSON.stringify(body),
+      });
+      if (response.status === 409) { error = ['Chuỗi đã thay đổi hoặc đã bị hủy. Tải lại và thử lại.', 'Series changed or was already canceled. Reload and try again.']; return; }
+      if (!response.ok) throw new Error();
+      if (seriesEdit?.id === s.id) clear();
+      await load();
+      notice = scope === 'all' ? ['Đã hủy toàn chuỗi.', 'Entire series canceled.'] : ['Đã hủy từ buổi đã chọn.', 'Series canceled from selected occurrence.'];
+    } catch { error = ['Không thể hủy chuỗi; hãy tải lại.', 'Could not cancel series; reload and retry.']; }
+    finally { busy = false; }
   }
   function editOccurrence(s, o) {
     edit({...o, id: s.id});
@@ -68,19 +124,36 @@
   }
   async function saveSeries(event) {
     event.preventDefault(); error = ''; notice = ''; busy = true;
+    const editingSeries = seriesEdit;
     try {
-      const start = instant(starts, zone), end = instant(ends, zone);
+      const start = instant(starts, zone);
+      const end = editingSeries && starts === seriesStartText && ends === seriesEndText && start !== null ? start + seriesDuration : instant(ends, zone);
       if (start === null || end === null || end <= start) { error = ['Giờ không hợp lệ hoặc mơ hồ.', 'Invalid or ambiguous time.']; return; }
       const frequency = Number(repeatFrequency);
       const rule = {frequency, interval:Number(repeatInterval), count:repeatEnd === 'count' ? Number(repeatCount) : 0, until:repeatEnd === 'until' ? repeatUntil : ''};
       if (frequency === 2) rule.weekdays = repeatWeekdays.map(Number);
       if (frequency === 3 && repeatMonthMode === 'day') rule.month_day = Number(repeatMonthDay);
       if (frequency === 3 && repeatMonthMode === 'nth') { rule.nth = Number(repeatNth); rule.nth_weekday = Number(repeatNthWeekday); }
-      const response = await fetch('/api/series', { method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({room_id:Number(roomId),title:title.trim(),organizer:organizer.trim(),private:isPrivate,starts:start,duration_seconds:end-start,...rule}) });
-      if (response.status === 409) { error = ['Lịch trùng.', 'Booking conflict.']; return; }
-      if (!response.ok) { const message = await response.text(); error = message.includes('12-month') ? ['Chuỗi phải kết thúc trong giới hạn 12 tháng.', 'The series must end within the 12-month limit.'] : ['Quy tắc hoặc giờ không hợp lệ, hoặc giờ bị mơ hồ do DST.', 'Invalid rule or time, or ambiguous DST time.']; return; }
-      clear(); await load(); notice = ['Đã tạo chuỗi.', 'Series created.'];
-    } catch { error = ['Không thể tạo chuỗi.', 'Could not create series.']; }
+      const payload = {room_id:Number(roomId),title:title.trim(),organizer:organizer.trim(),private:isPrivate,starts:start,duration_seconds:end-start,...rule};
+      let url = '/api/series';
+      if (editingSeries) {
+        url = `/api/series/${editingSeries.id}`;
+        payload.scope = editingSeries.scope;
+        payload.version = editingSeries.version;
+        if (editingSeries.scope === 'from') payload.original_starts = editingSeries.originalStarts;
+      }
+      const response = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(payload) });
+      if (response.status === 409) {
+        const message = await response.text();
+        error = message.includes('exception_conflict')
+          ? ['Không thể sửa hoặc tách chuỗi vì một ngoại lệ sẽ mất giờ gốc. Hãy sửa hoặc hủy ngoại lệ đó trước.', 'Cannot modify or split series because an exception would lose its original start. Resolve that exception first.']
+          : ['Chuỗi đã thay đổi hoặc có lịch trùng.', 'Series changed or booking conflict.'];
+        return;
+      }
+      if (!response.ok) { error = ['Quy tắc hoặc giờ không hợp lệ, hoặc giờ bị mơ hồ do DST.', 'Invalid rule or time, or ambiguous DST time.']; return; }
+      clear(); await load();
+      notice = editingSeries ? ['Đã cập nhật chuỗi.', 'Series updated.'] : ['Đã tạo chuỗi.', 'Series created.'];
+    } catch { error = editingSeries ? ['Không thể cập nhật chuỗi.', 'Could not update series.'] : ['Không thể tạo chuỗi.', 'Could not create series.']; }
     finally { busy = false; }
   }
   async function cancel(b) {
@@ -243,7 +316,7 @@
             <span class="ui-pill ui-pill--neutral">{series.length}</span>
           </div>
           <p class="policy-note">
-            {t('Lịch đơn được kiểm tra toàn bộ; xung đột giữa các chuỗi chỉ được kiểm tra trong 12 tháng. Xung đột ngoài cửa sổ có thể được lưu và chưa được cảnh báo cho đến khi vào cửa sổ quét. Cảnh báo không được bảo đảm nếu worker lỗi hoặc quá hạn; hãy kiểm tra thủ công lịch xa. Có thể sửa hoặc hủy từng buổi, chưa thể sửa hoặc hủy cả chuỗi.', 'Single bookings are checked throughout; conflicts between series are checked only within 12 months. Conflicts outside this window can be saved and are not alerted until they enter the scan window. Alerts are not guaranteed if the worker fails or is overdue; manually check distant schedules. Individual occurrences can be edited or canceled, but not entire series.')}
+            {t('Lịch đơn được kiểm tra toàn bộ; xung đột giữa các chuỗi chỉ được kiểm tra trong 12 tháng. Xung đột ngoài cửa sổ có thể được lưu và chưa được cảnh báo cho đến khi vào cửa sổ quét. Cảnh báo không được bảo đảm nếu worker lỗi hoặc quá hạn; hãy kiểm tra thủ công lịch xa. Có thể sửa hoặc hủy từng buổi, từ buổi này trở đi hoặc toàn chuỗi; thay đổi làm mất giờ gốc của ngoại lệ sẽ bị từ chối.', 'Single bookings are checked throughout; conflicts between series are checked only within 12 months. Conflicts outside this window can be saved and are not alerted until they enter the scan window. Alerts are not guaranteed if the worker fails or is overdue; manually check distant schedules. Individual occurrences, this-and-following, or entire series can be edited or canceled; changes that would drop an exception’s original start are rejected.')}
           </p>
           {#if loading}
             <p class="ui-loading" role="status">
@@ -257,16 +330,23 @@
           {:else}
             <ul class="ui-card-list">
               {#each series as s (s.id)}
-                <li class="ui-card">
+                <li class="ui-card" class:is-canceled={s.canceled} class:is-editing={seriesEdit?.id === s.id}>
                   <div class="card-badges">
                     <span class="room-badge">{rooms.find(r => r.id === s.room_id)?.name ?? s.room_id}</span>
                     {#if s.private}<span class="ui-pill ui-pill--neutral">{t('(Riêng tư)', '(Private)')}</span>{/if}
+                    {#if s.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
                     <span class="ui-pill ui-pill--success">
                       {t('Lặp mỗi', 'Repeat every')} {s.rule.rule.Interval} {s.rule.rule.Frequency === 1 ? t('ngày', 'days') : s.rule.rule.Frequency === 2 ? t('tuần', 'weeks') : t('tháng', 'months')}
                     </span>
                   </div>
                   <strong class="card-title">{s.title}</strong>
                   <p class="series-organizer">{t('Người tổ chức', 'Organizer')}: {s.organizer}</p>
+                  {#if !s.canceled}
+                    <div class="card-actions">
+                      <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'all')}>{t('Sửa chuỗi', 'Edit series')}</button>
+                      <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'all')}>{t('Hủy chuỗi', 'Cancel series')}</button>
+                    </div>
+                  {/if}
 
                   <div class="series-meta-grid">
                     <div><span>{t('Múi giờ chuỗi', 'Series time zone')}</span><strong class="mono">{s.rule.location}</strong></div>
@@ -274,7 +354,7 @@
                     <div>
                       <span>{t('Quy tắc', 'Pattern')}</span>
                       <strong>
-                        {#if s.rule.rule.Frequency === 2}{t('thứ', 'weekdays')}: {s.rule.rule.Weekdays.join(', ')}{/if}
+                        {#if s.rule.rule.Frequency === 2}{t('thứ', 'weekdays')}: {(s.rule.rule.Weekdays ?? []).join(', ')}{/if}
                         {#if s.rule.rule.Frequency === 3}{s.rule.rule.MonthDay ? `${t('ngày', 'day')} ${s.rule.rule.MonthDay}` : `${t('thứ tự', 'position')} ${s.rule.rule.Nth}, ${t('thứ', 'weekday')} ${s.rule.rule.NthWeekday}`}{/if}
                         {#if s.rule.rule.Frequency === 1}{t('Hàng ngày', 'Daily')}{/if}
                         ·
@@ -294,10 +374,12 @@
                             <span>{occurrence.title} · {rooms.find(r => r.id === occurrence.room_id)?.name ?? occurrence.room_id}</span>
                             {#if occurrence.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
                           </div>
-                          {#if !occurrence.canceled}
+                          {#if !s.canceled && !occurrence.canceled}
                             <div class="card-actions">
                               <button class="secondary" type="button" disabled={busy} onclick={() => editOccurrence(s, occurrence)}>{t('Sửa buổi', 'Edit occurrence')}</button>
                               <button class="danger" type="button" disabled={busy} onclick={() => cancelOccurrence(s, occurrence)}>{t('Hủy buổi', 'Cancel occurrence')}</button>
+                              <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'from', occurrence)}>{t('Sửa từ buổi này', 'Edit from here')}</button>
+                              <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'from', occurrence.original_starts)}>{t('Hủy từ buổi này', 'Cancel from here')}</button>
                             </div>
                           {/if}
                         </li>
@@ -355,8 +437,11 @@
       </form>
 
       {#if seriesEnabled}
-        <form onsubmit={saveSeries}>
-          <h3>{t('Tạo chuỗi', 'Create series')}</h3>
+        <form class:ui-form-editing={seriesEdit !== null} onsubmit={saveSeries}>
+          <div class="form-head">
+            <h3>{seriesEdit ? (seriesEdit.scope === 'all' ? t('Sửa toàn chuỗi', 'Edit entire series') : t('Sửa từ buổi đã chọn', 'Edit from selected occurrence')) : t('Tạo chuỗi', 'Create series')}</h3>
+            {#if seriesEdit}<span class="ui-pill ui-pill--warning">{seriesEdit.scope === 'all' ? t('Toàn chuỗi', 'Entire series') : t('Từ buổi này', 'From occurrence')}</span>{/if}
+          </div>
           <p class="series-inherit-note">{t('Dùng phòng, tiêu đề, người tổ chức, thời gian và riêng tư từ biểu mẫu lịch ở trên.', 'Uses room, title, organizer, time and privacy from the booking form above.')}</p>
 
           <div class="form-grid-2">
@@ -435,7 +520,10 @@
             <Banner kind="warning" text={t('Chuỗi không có ngày kết thúc chỉ được quét từng cửa sổ 12 tháng và chỉ hỗ trợ đến năm 2400. Giờ không tồn tại hoặc mơ hồ do DST có thể làm worker ngừng quét; khi worker lỗi hoặc quá hạn, cảnh báo có thể thiếu và màn hình có thể chuyển Không xác định.', 'A series without an end date is scanned in 12-month windows and supported only through year 2400. A nonexistent or ambiguous DST time can stop the worker scan; when the worker fails or is overdue, alerts may be incomplete and displays may become Unknown.')} />
           {/if}
 
-          <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends}>{t('Tạo chuỗi', 'Create series')}</button>
+          <div class="ui-form-actions">
+            <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends}>{seriesEdit ? t('Lưu thay đổi chuỗi', 'Save series changes') : t('Tạo chuỗi', 'Create series')}</button>
+            {#if seriesEdit}<button class="secondary" type="button" onclick={clear} disabled={busy}>{t('Hủy sửa chuỗi', 'Cancel series edit')}</button>{/if}
+          </div>
         </form>
       {/if}
     </aside>

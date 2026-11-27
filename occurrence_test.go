@@ -412,7 +412,7 @@ func TestMigration11PreservesOccurrencesAndRollsBack(t *testing.T) {
 			if err = migrate(db); err != nil {
 				t.Fatal(err)
 			}
-			_, err = db.Exec(`DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('room'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series','admin',1,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); PRAGMA user_version=11`)
+			_, err = db.Exec(`DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('room'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series','admin',1,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); PRAGMA user_version=11`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -442,7 +442,7 @@ func TestMigration11PreservesOccurrencesAndRollsBack(t *testing.T) {
 				if err = migrate(db); err != nil {
 					t.Fatal(err)
 				}
-			} else if version != 15 {
+			} else if version != 16 {
 				t.Fatalf("version %d", version)
 			}
 			var originals int
@@ -465,7 +465,7 @@ func TestOfficialMigrationPreservesPublicID(t *testing.T) {
 			if err = migrate(db); err != nil {
 				t.Fatal(err)
 			}
-			_, err = db.Exec(`DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences(series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',X'01','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'meeting','admin',0,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200); PRAGMA user_version=11`)
+			_, err = db.Exec(`DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences(series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',X'01','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'meeting','admin',0,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200); PRAGMA user_version=11`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -479,7 +479,7 @@ func TestOfficialMigrationPreservesPublicID(t *testing.T) {
 			}
 			var id string
 			var version, horizon, original int
-			if err = db.QueryRow("SELECT devices.public_id,(SELECT user_version FROM pragma_user_version),booking_series.checked_through,series_occurrences.original_starts FROM devices,booking_series,series_occurrences").Scan(&id, &version, &horizon, &original); err != nil || len(id) != 32 || version != 15 || horizon != 200 || original != 100 || (v == 11 && id != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+			if err = db.QueryRow("SELECT devices.public_id,(SELECT user_version FROM pragma_user_version),booking_series.checked_through,series_occurrences.original_starts FROM devices,booking_series,series_occurrences").Scan(&id, &version, &horizon, &original); err != nil || len(id) != 32 || version != 16 || horizon != 200 || original != 100 || (v == 11 && id != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
 				t.Fatalf("id=%s version=%d horizon=%d original=%d error=%v", id, version, horizon, original, err)
 			}
 		})

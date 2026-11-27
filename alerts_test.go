@@ -477,6 +477,80 @@ func TestNewRoomCreationCoverageBeforeWorkerScan(t *testing.T) {
 	}
 }
 
+func TestCheckpointESlidingWindowConflictAndKiosk(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "checkpoint-e.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err = migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	adminToken := strings.Repeat("a", 43)
+	deviceToken := strings.Repeat("d", 43)
+	if _, err = db.Exec(`INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('Room E')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'kiosk',?,'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')`, tokenHash(deviceToken)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`INSERT INTO sessions VALUES(?,1,'csrf',?)`, tokenHash(adminToken), now.Add(time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+	h := handlerWithAuth(db, "https://example.test", netip.Addr{})
+	req := func(method, path, body, auth string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "https://example.test"+path, strings.NewReader(body))
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-CSRF-Token", "csrf")
+		if auth == "admin" {
+			r.AddCookie(&http.Cookie{Name: "__Host-session", Value: adminToken})
+		} else if auth == "kiosk" {
+			r.Header.Set("Authorization", "Bearer "+deviceToken)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	// Series 1: days 1, 101, 201, 301, 401 from now (horizon ~day 366)
+	s1Start := now.Add(24 * time.Hour)
+	if w := req("POST", "/api/series", fmt.Sprintf(`{"room_id":1,"title":"Series 100d","organizer":"admin","private":false,"starts":%d,"duration_seconds":3600,"frequency":1,"interval":100,"count":5}`, s1Start.Unix()), "admin"); w.Code != 201 {
+		t.Fatalf("create series 1: %d %s", w.Code, w.Body.String())
+	}
+	// Series 2: days 2, 135, 268, 401 from now (horizon ~day 367); overlaps series 1 only at day 401 outside both 12m windows
+	s2Start := now.Add(48 * time.Hour)
+	if w := req("POST", "/api/series", fmt.Sprintf(`{"room_id":1,"title":"Series 133d","organizer":"admin","private":false,"starts":%d,"duration_seconds":3600,"frequency":1,"interval":133,"count":4}`, s2Start.Unix()), "admin"); w.Code != 201 {
+		t.Fatalf("create series 2 outside 12m window: %d %s", w.Code, w.Body.String())
+	}
+	if w := req("GET", "/api/alerts", "", "admin"); w.Code != 200 || w.Body.String() != "[]\n" {
+		t.Fatalf("expected no alerts initially, got %d %s", w.Code, w.Body.String())
+	}
+	// Window slides forward 3 months: s2Start now enters [shifted, shifted+12m)
+	shifted := now.AddDate(0, 3, 0)
+	if err = runConflictScan(db, shifted); err != nil {
+		t.Fatal(err)
+	}
+	// Conflict alerts active, neither series auto-canceled
+	w := req("GET", "/api/alerts", "", "admin")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"series_a":1`) || !strings.Contains(w.Body.String(), `"series_b":2`) {
+		t.Fatalf("expected sliding-window alerts, got %d %s", w.Code, w.Body.String())
+	}
+	var canceledSeries int
+	if err = db.QueryRow("SELECT COUNT(*) FROM booking_series WHERE canceled=1").Scan(&canceledSeries); err != nil || canceledSeries != 0 {
+		t.Fatalf("series unexpectedly auto-canceled: %d %v", canceledSeries, err)
+	}
+	// Acknowledge alert does not cancel or clear conflict; canceling series 2 clears alert on next scan
+	if w = req("POST", "/api/alerts/1/acknowledge", "", "admin"); w.Code != 204 {
+		t.Fatalf("acknowledge: %d %s", w.Code, w.Body.String())
+	}
+	// Kiosk still serves Room E accurately (and has valid_until set)
+	if w = req("GET", "/api/kiosk", "", "kiosk"); w.Code != 200 || !strings.Contains(w.Body.String(), `"valid_until":`) {
+		t.Fatalf("kiosk after scan: %d %s", w.Code, w.Body.String())
+	}
+}
+
+
 func TestRoomScanFailureDoesNotInvalidateOtherRoomCoverage(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

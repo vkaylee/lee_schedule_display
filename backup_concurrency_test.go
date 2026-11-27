@@ -2,9 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -92,5 +94,65 @@ func TestBackupDuringExclusiveRollbackWrite(t *testing.T) {
 	}
 	if err := backupSQLite(source, destination); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBackupDuringCommitContention(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	db, err := sql.Open("sqlite", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("PRAGMA journal_mode=DELETE; CREATE TABLE records (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 40)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 1; i <= 25; i++ {
+			_, execErr := db.Exec("BEGIN IMMEDIATE; INSERT INTO records(value) VALUES(?); INSERT INTO records(value) VALUES(?); COMMIT", i, i)
+			if execErr != nil && !strings.Contains(execErr.Error(), "SQLITE_BUSY") && !strings.Contains(execErr.Error(), "database is locked") {
+				errs <- fmt.Errorf("unexpected writer error: %w", execErr)
+				return
+			}
+		}
+	}()
+	var snapshots []string
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 15; i++ {
+			dst := filepath.Join(dir, fmt.Sprintf("snap-%d.db", i))
+			if bErr := backupSQLite(source, dst); bErr == nil {
+				snapshots = append(snapshots, dst)
+			} else if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+				errs <- fmt.Errorf("failed backup left partial file %s: %v", dst, statErr)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	for _, snap := range snapshots {
+		copyDB, err := sql.Open("sqlite", snap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var integrity string
+		var count int
+		err = copyDB.QueryRow("PRAGMA integrity_check").Scan(&integrity)
+		if err == nil {
+			err = copyDB.QueryRow("SELECT COUNT(*) FROM records").Scan(&count)
+		}
+		copyDB.Close()
+		if err != nil || integrity != "ok" || count%2 != 0 {
+			t.Fatalf("snapshot %s broken: integrity=%q count=%d err=%v", snap, integrity, count, err)
+		}
 	}
 }

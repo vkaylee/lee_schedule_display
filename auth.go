@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 15 {
+	if version > 16 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -147,11 +147,22 @@ PRAGMA user_version = 13`); err != nil {
 			return err
 		}
 	}
+	if version <= 15 {
+		if _, err := tx.Exec(`ALTER TABLE booking_series ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE booking_series ADD COLUMN canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1));
+CREATE TABLE series_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
+PRAGMA user_version = 16`); err != nil {
+			return err
+		}
+	}
 	var compatible bool
 	if err := tx.QueryRow(`SELECT
 (SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='public_id')=1 AND
-(SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name IN ('id','room_id','title','organizer','private','rule','actor_id','checked_through'))=8 AND
+(SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name IN ('id','room_id','title','organizer','private','rule','actor_id','checked_through','version','canceled'))=10 AND
 (SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name='id' AND pk=1)=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE (name='version' AND dflt_value='1' AND "notnull"=1) OR (name='canceled' AND dflt_value='0' AND "notnull"=1))=2 AND
+(SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='booking_series' AND lower(replace(replace(sql,' ',''),char(10),'')) LIKE '%check(canceledin(0,1))%')=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('series_audit') WHERE name IN ('id','actor_id','series_id','action','created_at'))=5 AND
 (SELECT COUNT(*) FROM pragma_index_list('devices') WHERE name='devices_public_id' AND "unique"=1 AND partial=1)=1 AND
 (SELECT COUNT(*) FROM pragma_index_info('devices_public_id') WHERE seqno=0 AND name='public_id')=1 AND
 (SELECT COUNT(*) FROM pragma_index_info('devices_public_id'))=1 AND

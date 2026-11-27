@@ -5,7 +5,8 @@
   import DisplayCanvas from './DisplayCanvas.svelte';
   import { defaultDisplayLayout } from './display-layout.js';
   let { id } = $props();
-  let data = $state(null), config = $state({ organization:'', logo:'', blocks:defaultDisplayLayout }), zone = $state('UTC'), status = $state('Không xác định'), clock = $state(new Date()), scheduleNow = $state(null), error = $state('');
+  let data = $state(null), config = $state({ organization:'', logo:'', blocks:defaultDisplayLayout }), zone = $state('UTC'), status = $state('Không xác định'), clock = $state(new Date()), scheduleNow = $state(null), language = $state('vi'), error = $state('');
+  const t = (vi, en) => language === 'en' ? en : vi;
   let syncClock = 0, syncWall = 0, serverNow = 0, uncertainty = 0, generation = 0, syncing = false;
   function tick() { const elapsed = performance.now() - syncClock; status = statusAt(data, elapsed, Date.now() - syncWall, serverNow, uncertainty, 30000); scheduleNow = status === 'Không xác định' ? null : serverNow + elapsed / 1000; if (scheduleNow !== null) clock = new Date(scheduleNow * 1000); }
   async function sync() {
@@ -17,8 +18,8 @@
       const result = await response.json();
       const elapsed = performance.now() - start, wallElapsed = Date.now() - wall;
       if (current !== generation || document.hidden || elapsed < 0 || wallElapsed < 0 || Math.abs(elapsed - wallElapsed) > 1000) throw new Error();
-      data = result; config = result.config; syncClock = performance.now(); syncWall = Date.now(); serverNow = result.now; uncertainty = Math.max(elapsed, wallElapsed); error = ''; tick();
-    } catch { if (current === generation) { data = null; status = 'Không xác định'; error = 'Không thể kết nối hoặc thiết bị không còn hoạt động.'; } }
+      data = result; config = result.config; language = result.language === 'en' ? 'en' : 'vi'; syncClock = performance.now(); syncWall = Date.now(); serverNow = result.now; uncertainty = Math.max(elapsed, wallElapsed); error = ''; tick();
+    } catch { if (current === generation) { data = null; status = 'Không xác định'; error = ['Không thể kết nối hoặc thiết bị không còn hoạt động.', 'Connection lost or device is no longer active.']; } }
     finally { syncing = false; if (current !== generation && !document.hidden) sync(); }
   }
   onMount(() => {
@@ -31,11 +32,11 @@
   });
 </script>
 <main class="public-display">
-  <DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} />
+  <DisplayCanvas {config} {data} {status} {zone} {clock} {scheduleNow} {language} />
   {#if error}
     <p class="display-alert" role="alert">
       <Icon name="alert" />
-      <span>{error}</span>
+      <span>{t(...error)}</span>
     </p>
   {/if}
 </main>

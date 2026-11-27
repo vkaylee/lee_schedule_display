@@ -107,7 +107,7 @@ func storeSeries(db *sql.DB, token, csrf string, b booking, rule recurrence.Rule
 		return err
 	}
 	var conflict bool
-	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pending_occurrences p JOIN bookings b ON b.room_id=? AND b.canceled=0 AND b.starts<p.ends AND b.ends>p.starts UNION ALL SELECT 1 FROM pending_occurrences p JOIN booking_series s ON 1=1 JOIN series_occurrences o ON o.series_id=s.id AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.starts<p.ends AND o.ends>p.starts WHERE o.version>1 OR (p.starts<? AND p.ends>? AND o.starts<? AND o.ends>?) OR (p.starts<s.checked_through AND o.starts<s.checked_through))`, b.RoomID, b.RoomID, horizon.Unix(), anchor.Unix(), horizon.Unix(), anchor.Unix()).Scan(&conflict)
+	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pending_occurrences p JOIN bookings b ON b.room_id=? AND b.canceled=0 AND b.starts<p.ends AND b.ends>p.starts UNION ALL SELECT 1 FROM pending_occurrences p JOIN booking_series s ON s.canceled=0 JOIN series_occurrences o ON o.series_id=s.id AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.starts<p.ends AND o.ends>p.starts WHERE o.version>1 OR (p.starts<? AND p.ends>? AND o.starts<? AND o.ends>?) OR (p.starts<s.checked_through AND o.starts<s.checked_through))`, b.RoomID, b.RoomID, horizon.Unix(), anchor.Unix(), horizon.Unix(), anchor.Unix()).Scan(&conflict)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func registerSeriesHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		if _, _, _, ok := session(w, r); !ok {
 			return
 		}
-		rows, err := db.Query("SELECT s.id,s.room_id,s.title,s.organizer,s.private,s.rule,COALESCE(s.checked_through,0),o.starts,o.ends,o.original_starts,o.version,o.canceled,COALESCE(o.room_id,s.room_id),COALESCE(o.title,s.title),COALESCE(o.organizer,s.organizer),COALESCE(o.private,s.private) FROM booking_series s JOIN series_occurrences o ON o.series_id=s.id ORDER BY s.id,o.starts")
+		rows, err := db.Query("SELECT s.id,s.room_id,s.title,s.organizer,s.private,s.rule,COALESCE(s.checked_through,0),s.version,s.canceled,o.starts,o.ends,o.original_starts,o.version,o.canceled,COALESCE(o.room_id,s.room_id),COALESCE(o.title,s.title),COALESCE(o.organizer,s.organizer),COALESCE(o.private,s.private) FROM booking_series s JOIN series_occurrences o ON o.series_id=s.id ORDER BY s.id,o.starts")
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -179,6 +179,8 @@ func registerSeriesHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		type item struct {
 			Occurrences    []occurrence    `json:"occurrences"`
 			CheckedThrough int64           `json:"checked_through"`
+			Version        int64           `json:"version"`
+			Canceled       bool            `json:"canceled"`
 			ID             int64           `json:"id"`
 			RoomID         int64           `json:"room_id"`
 			Title          string          `json:"title"`
@@ -191,7 +193,7 @@ func registerSeriesHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			var x item
 			var raw string
 			var o occurrence
-			if rows.Scan(&x.ID, &x.RoomID, &x.Title, &x.Organizer, &x.Private, &raw, &x.CheckedThrough, &o.Starts, &o.Ends, &o.Original, &o.Version, &o.Canceled, &o.RoomID, &o.Title, &o.Organizer, &o.Private) != nil || !json.Valid([]byte(raw)) {
+			if rows.Scan(&x.ID, &x.RoomID, &x.Title, &x.Organizer, &x.Private, &raw, &x.CheckedThrough, &x.Version, &x.Canceled, &o.Starts, &o.Ends, &o.Original, &o.Version, &o.Canceled, &o.RoomID, &o.Title, &o.Organizer, &o.Private) != nil || !json.Valid([]byte(raw)) {
 				http.Error(w, "internal error", 500)
 				return
 			}
@@ -263,6 +265,7 @@ func registerSeriesHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 	}
 	mux.HandleFunc("POST /api/series/{id}/occurrences/{original}", mutate(false))
 	mux.HandleFunc("POST /api/series/{id}/occurrences/{original}/cancel", mutate(true))
+	registerSeriesScopeHandlers(mux, db, post, session, zone)
 	mux.HandleFunc("POST /api/series", post(func(w http.ResponseWriter, r *http.Request) {
 		token, _, csrf, ok := session(w, r)
 		if !ok {

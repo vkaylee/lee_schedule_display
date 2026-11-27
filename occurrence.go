@@ -31,12 +31,12 @@ func mutateOccurrence(db *sql.DB, token, csrf string, series, original int64, b 
 		return err
 	}
 	var version int64
-	var canceled bool
-	err = tx.QueryRow("SELECT version,canceled FROM series_occurrences WHERE series_id=? AND original_starts=?", series, original).Scan(&version, &canceled)
+	var canceled, seriesCanceled bool
+	err = tx.QueryRow("SELECT o.version,o.canceled,s.canceled FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE o.series_id=? AND o.original_starts=?", series, original).Scan(&version, &canceled, &seriesCanceled)
 	if err != nil {
 		return err
 	}
-	if canceled || version != b.Version {
+	if canceled || seriesCanceled || version != b.Version {
 		return errSeriesConflict
 	}
 	if !cancel {
@@ -52,7 +52,7 @@ func mutateOccurrence(db *sql.DB, token, csrf string, series, original int64, b 
 			return err
 		}
 		var conflict bool
-		err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE o.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND NOT(o.series_id=? AND o.original_starts=?) AND o.starts<? AND o.ends>?)`, b.RoomID, b.Ends, b.Starts, b.RoomID, series, original, b.Ends, b.Starts).Scan(&conflict)
+		err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM bookings WHERE room_id=? AND canceled=0 AND starts<? AND ends>? UNION ALL SELECT 1 FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND o.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND NOT(o.series_id=? AND o.original_starts=?) AND o.starts<? AND o.ends>?)`, b.RoomID, b.Ends, b.Starts, b.RoomID, series, original, b.Ends, b.Starts).Scan(&conflict)
 		if err != nil {
 			return err
 		}

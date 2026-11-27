@@ -15,7 +15,7 @@ type storedSeriesRule struct {
 
 func displayCoverage(query interface{ QueryRow(string, ...any) *sql.Row }, roomID, now int64) (sql.NullInt64, error) {
 	var cutoff sql.NullInt64
-	err := query.QueryRow(`SELECT MIN(CASE WHEN c.starts IS NULL THEN MAX(?,COALESCE(CAST(strftime('%s',json_extract(s.rule,'$.rule.Start')) AS INTEGER),?)) WHEN c.starts>? THEN c.starts WHEN c.ends<=? THEN ? ELSE c.ends END) FROM booking_series s LEFT JOIN materialization_coverage c ON c.series_id=s.id WHERE s.room_id=? AND json_extract(s.rule,'$.rule.Count')=0 AND json_extract(s.rule,'$.rule.Until')='0001-01-01T00:00:00Z'`, now, now, now, now, now, roomID).Scan(&cutoff)
+	err := query.QueryRow(`SELECT MIN(CASE WHEN c.starts IS NULL THEN MAX(?,COALESCE(CAST(strftime('%s',json_extract(s.rule,'$.rule.Start')) AS INTEGER),?)) WHEN c.starts>? THEN c.starts WHEN c.ends<=? THEN ? ELSE c.ends END) FROM booking_series s LEFT JOIN materialization_coverage c ON c.series_id=s.id WHERE s.canceled=0 AND s.room_id=? AND json_extract(s.rule,'$.rule.Count')=0 AND json_extract(s.rule,'$.rule.Until')='0001-01-01T00:00:00Z'`, now, now, now, now, now, roomID).Scan(&cutoff)
 	return cutoff, err
 }
 
@@ -57,11 +57,17 @@ func materializeUnbounded(db *sql.DB, from, to time.Time) error {
 	return tx.Commit()
 }
 func recordMaterializationCoverage(tx *sql.Tx, from, to time.Time) error {
-	_, err := tx.Exec(`INSERT INTO materialization_coverage(series_id,starts,ends) SELECT id,?,? FROM booking_series WHERE json_extract(rule,'$.rule.Count')=0 AND json_extract(rule,'$.rule.Until')='0001-01-01T00:00:00Z' ON CONFLICT(series_id) DO UPDATE SET starts=excluded.starts,ends=excluded.ends`, from.Unix(), to.Unix())
+	if _, err := tx.Exec(`DELETE FROM materialization_coverage WHERE series_id IN (SELECT id FROM booking_series WHERE canceled=1 OR json_extract(rule,'$.rule.Count')!=0 OR json_extract(rule,'$.rule.Until')!='0001-01-01T00:00:00Z')`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO materialization_coverage(series_id,starts,ends) SELECT id,?,? FROM booking_series WHERE canceled=0 AND json_extract(rule,'$.rule.Count')=0 AND json_extract(rule,'$.rule.Until')='0001-01-01T00:00:00Z' ON CONFLICT(series_id) DO UPDATE SET starts=excluded.starts,ends=excluded.ends`, from.Unix(), to.Unix())
 	return err
 }
 func recordMaterializationCoverageRoom(tx *sql.Tx, from, to time.Time, room int64) error {
-	_, err := tx.Exec(`INSERT INTO materialization_coverage(series_id,starts,ends) SELECT id,?,? FROM booking_series WHERE room_id=? AND json_extract(rule,'$.rule.Count')=0 AND json_extract(rule,'$.rule.Until')='0001-01-01T00:00:00Z' ON CONFLICT(series_id) DO UPDATE SET starts=excluded.starts,ends=excluded.ends`, from.Unix(), to.Unix(), room)
+	if _, err := tx.Exec(`DELETE FROM materialization_coverage WHERE series_id IN (SELECT id FROM booking_series WHERE room_id=? AND (canceled=1 OR json_extract(rule,'$.rule.Count')!=0 OR json_extract(rule,'$.rule.Until')!='0001-01-01T00:00:00Z'))`, room); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO materialization_coverage(series_id,starts,ends) SELECT id,?,? FROM booking_series WHERE canceled=0 AND room_id=? AND json_extract(rule,'$.rule.Count')=0 AND json_extract(rule,'$.rule.Until')='0001-01-01T00:00:00Z' ON CONFLICT(series_id) DO UPDATE SET starts=excluded.starts,ends=excluded.ends`, from.Unix(), to.Unix(), room)
 	return err
 }
 func materializeUnboundedTx(tx *sql.Tx, from, to time.Time) error {
@@ -71,7 +77,7 @@ func materializeUnboundedRoomTx(tx *sql.Tx, from, to time.Time, roomID int64) er
 	if from.Year() < 1900 || to.After(time.Date(2401, 1, 1, 0, 0, 0, 0, time.UTC)) || !from.Before(to) {
 		return recurrence.ErrLimit
 	}
-	rows, err := tx.Query("SELECT id,rule FROM booking_series WHERE ?=0 OR room_id=?", roomID, roomID)
+	rows, err := tx.Query("SELECT id,rule FROM booking_series WHERE canceled=0 AND (?=0 OR room_id=?)", roomID, roomID)
 	if err != nil {
 		return err
 	}
