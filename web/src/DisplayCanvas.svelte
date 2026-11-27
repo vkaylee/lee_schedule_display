@@ -1,13 +1,14 @@
 <script>
   import { displaySchedule } from './display-schedule.js';
-  import { gridCell, resizeEdges } from './display-layout.js';
-  let { config, data, status = 'Không xác định', zone = 'UTC', clock = new Date(), scheduleNow = null, editing = false, onmove = () => {}, onresize = () => {}, onselect = () => {} } = $props();
+  import { canvasScale, gridCell, moveBlock, resizeEdges } from './display-layout.js';
+  let { config, data, status = 'Không xác định', zone = 'UTC', clock = new Date(), scheduleNow = null, editing = false, zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {} } = $props();
   let viewportWidth = $state(0), windowHeight = $state(0);
   let resizeStart = null;
-  let dragging = '';
+  let dragging = null;
   let dragOffset = { x: 0, y: 0 };
+  let dragPreview = $state(null);
   let rowCount = $derived(config.rows || Math.max(7, ...config.blocks.map(block => block.y + block.h)));
-  let scale = $derived(config.width && viewportWidth ? Math.min(viewportWidth / config.width, (editing ? Math.max(280, windowHeight * 0.7) : windowHeight || config.height) / config.height) : 1);
+  let scale = $derived(canvasScale(config.width, config.height, viewportWidth, editing ? Math.max(280, windowHeight * 0.7) : windowHeight, editing ? zoomMode : 'fit', editing ? zoom : 1));
   let schedule = $derived(displaySchedule(data?.entries || [], scheduleNow ?? 0, data?.valid_until));
   const labels = { clock: 'Giờ và ngày', branding: 'Tổ chức', room: 'Tên phòng', status: 'Trạng thái', upcoming: 'Lịch tiếp theo', footer: 'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' };
   const key = block => block.id || block.type;
@@ -24,16 +25,27 @@
   function startDrag(event, block) {
     const cell = cellAt(event.currentTarget.parentElement, event.clientX, event.clientY);
     onselect(key(block));
-    dragging = key(block);
+    dragging = { key:key(block), block:{ ...block } };
     dragOffset = { x: cell.x - block.x, y: cell.y - block.y };
+    dragPreview = { key:key(block), ...moveBlock(block, 0, 0, rowCount) };
     event.dataTransfer.setData('text/plain', key(block));
     event.dataTransfer.effectAllowed = 'move';
   }
-  function drop(event) {
+  function previewDrag(event) {
     event.preventDefault();
+    if (!editing || !dragging) return;
     const cell = cellAt(event.currentTarget, event.clientX, event.clientY);
-    if (dragging) onmove(dragging, cell.x - dragOffset.x, cell.y - dragOffset.y);
-    dragging = '';
+    dragPreview = { key:dragging.key, ...moveBlock(dragging.block, cell.x - dragOffset.x - dragging.block.x, cell.y - dragOffset.y - dragging.block.y, rowCount) };
+  }
+  function drop(event) {
+    previewDrag(event);
+    if (dragging && dragPreview) onmove(dragging.key, dragPreview.x, dragPreview.y);
+    dragging = null;
+    dragPreview = null;
+  }
+  function cancelDrag() {
+    dragging = null;
+    dragPreview = null;
   }
   function startResize(event, block, edges) {
     if (!event.isPrimary || event.button !== 0 || resizeStart) return;
@@ -44,21 +56,33 @@
     resizeStart = { block: { ...block }, canvas, edges, cell:cellAt(canvas, event.clientX, event.clientY), pointer:event.pointerId };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
-  function finishResize(event) {
+  function updateResize(event) {
     if (!resizeStart || event.pointerId !== resizeStart.pointer) return;
     const { block, canvas, edges, cell } = resizeStart;
     const end = cellAt(canvas, event.clientX, event.clientY);
     onresize(key(block), resizeEdges(block, edges, end.x - cell.x, end.y - cell.y, rowCount));
+  }
+  function finishResize(event) {
+    if (!resizeStart || event.pointerId !== resizeStart.pointer) return;
+    updateResize(event);
     resizeStart = null;
   }
+  function cancelResize() {
+    if (!resizeStart) return;
+    const { block } = resizeStart;
+    resizeStart = null;
+    onresize(key(block), { x:block.x, y:block.y, w:block.w, h:block.h });
+  }
 </script>
-<svelte:window bind:innerHeight={windowHeight} />
-<div class="viewport" class:fixed={!!config.width} bind:clientWidth={viewportWidth} style={config.width ? `height:${config.height * scale}px` : ''}>
+<svelte:window bind:innerHeight={windowHeight} onkeydown={(event) => { if (event.key === 'Escape' && resizeStart) { event.preventDefault(); cancelResize(); } }} onblur={cancelResize} />
+<div class="viewport" class:fixed={!!config.width} class:editing bind:clientWidth={viewportWidth}>
+<div class="canvas-size" style={config.width ? `width:${config.width * scale}px;height:${config.height * scale}px` : ''}>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="canvas" class:editing class:fixed={!!config.width} style={`--rows:${rowCount};${config.width ? `width:${config.width}px;height:${config.height}px;transform:scale(${scale});` : ''}`} ondragover={(event) => { if (editing) event.preventDefault(); }} ondrop={drop}>
+<div class="canvas" class:editing class:fixed={!!config.width} style={`--rows:${rowCount};${config.width ? `width:${config.width}px;height:${config.height}px;transform:scale(${scale});` : ''}`} ondragover={previewDrag} ondrop={drop}>
   {#each config.blocks as block (key(block))}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <section class="block {block.type}" style={`grid-column:${block.x + 1} / span ${block.w};grid-row:${block.y + 1} / span ${block.h};${block.type === 'rectangle' && /^#[0-9a-f]{6}$/i.test(block.color) ? `background:${block.color}` : ''}`} draggable={editing} ondragstart={(event) => startDrag(event, block)} ondragend={() => dragging = ''}>
+    {#if editing && dragPreview?.key === key(block) && (dragPreview.x !== dragging.block.x || dragPreview.y !== dragging.block.y)}<div class="drag-origin" aria-hidden="true" style={`grid-column:${dragging.block.x + 1} / span ${block.w};grid-row:${dragging.block.y + 1} / span ${block.h}`}></div>{/if}
+    <section class="block {block.type}" class:drag-preview={dragPreview?.key === key(block)} style={`grid-column:${(dragPreview?.key === key(block) ? dragPreview.x : block.x) + 1} / span ${block.w};grid-row:${(dragPreview?.key === key(block) ? dragPreview.y : block.y) + 1} / span ${block.h};${block.type === 'rectangle' && /^#[0-9a-f]{6}$/i.test(block.color) ? `background:${block.color}` : ''}${block.type === 'text' ? `;padding:${Number.isInteger(block.padding) ? block.padding : 16}px;margin:${Number.isInteger(block.margin) ? block.margin : 0}px;justify-content:${({ top:'flex-start', center:'center', bottom:'flex-end' })[block.valign] || 'center'};align-items:${({ left:'flex-start', center:'center', right:'flex-end' })[block.align] || 'flex-start'};text-align:${block.align || 'left'};font-size:${Number.isInteger(block.fontSize) && block.fontSize >= 8 ? block.fontSize : 24}px` : ''}`} draggable={editing} ondragstart={(event) => startDrag(event, block)} ondragend={cancelDrag}>
       {#if editing}<button type="button" class="block-label" onclick={() => onselect(key(block))}>{labels[block.type]}</button>{/if}
       {#if block.type === 'clock'}
         <strong class="clock">{clock.toLocaleTimeString('vi-VN', { timeZone: zone, hour:'2-digit', minute:'2-digit' })}</strong><small>{clock.toLocaleDateString('vi-VN', { timeZone: zone, weekday:'long', day:'numeric', month:'long', year:'numeric' })}</small>
@@ -72,13 +96,15 @@
         <small>LỊCH TIẾP THEO</small>{#if status !== 'Không xác định' && scheduleNow !== null && schedule.upcoming.length}<ul>{#each schedule.upcoming as entry}<li>{time(entry.starts)} – {time(entry.ends)}</li>{/each}</ul>{:else}<p>{status === 'Không xác định' ? 'Không thể xác minh lịch' : 'Không có lịch sắp tới'}</p>{/if}
       {:else if block.type === 'text'}<span>{block.text}</span>
       {:else if block.type === 'footer'}<small>{status === 'Không xác định' ? 'Không thể xác minh kết nối' : 'Hệ thống đang hoạt động'}</small>{/if}
-      {#if editing}{#each ['n','s','e','w','ne','nw','se','sw'] as edge}<span class="resize {edge}" aria-hidden="true" onpointerdown={(event) => startResize(event, block, edge)} onpointerup={finishResize} onpointercancel={() => resizeStart = null} onlostpointercapture={() => resizeStart = null}></span>{/each}{/if}
+      {#if editing}{#each ['n','s','e','w','ne','nw','se','sw'] as edge}<span class="resize {edge}" aria-hidden="true" onpointerdown={(event) => startResize(event, block, edge)} onpointermove={updateResize} onpointerup={finishResize} onpointercancel={cancelResize} onlostpointercapture={cancelResize}></span>{/each}{/if}
     </section>
   {/each}
 </div>
 </div>
+</div>
 <style>
+  .viewport.editing.fixed{overflow-x:auto;background:#dce5db;border-radius:.5rem}.canvas-size{position:relative}.viewport:not(.fixed) .canvas-size{width:100%}
   .block.text{background:transparent;border-color:transparent;border-radius:0;pointer-events:none}.editing .block.text{pointer-events:auto}
   .editing .resize{position:absolute;z-index:2;touch-action:none;min-width:0;min-height:0}.resize.n,.resize.s{height:12px;left:12px;right:12px;cursor:ns-resize}.resize.n{top:0;bottom:auto}.resize.s{bottom:0}.resize.e,.resize.w{width:12px;top:12px;bottom:12px;cursor:ew-resize}.resize.e{right:0}.resize.w{left:0;right:auto}.resize.ne,.resize.nw,.resize.se,.resize.sw{width:16px;height:16px}.resize.ne{top:0;right:0;bottom:auto;cursor:nesw-resize}.resize.nw{top:0;left:0;bottom:auto;right:auto;cursor:nwse-resize}.resize.se{bottom:0;right:0;cursor:nwse-resize}.resize.sw{bottom:0;left:0;right:auto;cursor:nesw-resize}
-  .viewport.fixed{overflow:hidden}.canvas.fixed{box-sizing:border-box;min-height:0;transform-origin:top left;grid-template-rows:repeat(var(--rows),minmax(0,1fr));container-type:size;padding:1.5rem;gap:.7rem}.canvas.fixed .block{min-height:0;padding:1.4rem}.canvas.fixed .clock{font-size:clamp(1.5rem,3cqw,2.8rem)}.canvas.fixed .room h1{font-size:clamp(1.3rem,3.5cqw,3rem)}.canvas.fixed .state{font-size:clamp(1.8rem,5cqw,4.5rem)}.canvas.fixed small{font-size:clamp(.75rem,1cqw,.95rem)}.block{position:relative}.block-label{align-self:flex-start;border:0;background:transparent;padding:0;cursor:pointer}  .canvas{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:repeat(var(--rows),minmax(4rem,1fr));gap:.7rem;background:#edeFE8;padding:clamp(.75rem,1.5vw,1.5rem);color:#263f33;font-family:system-ui,sans-serif;min-height:100vh}.block{min-width:0;overflow:auto;background:#fffefa;border:1px solid #dce5db;border-radius:.65rem;padding:clamp(.75rem,1.5vw,1.4rem);display:flex;flex-direction:column;justify-content:center}.editing{min-height:28rem;border-radius:.65rem}.editing .block{cursor:grab}.block-label{font-size:.7rem;color:#486457}.clock{font-size:clamp(1.5rem,3vw,2.8rem);line-height:1;font-variant-numeric:tabular-nums}.branding{flex-direction:row;align-items:center;justify-content:space-between;gap:1rem}.branding img{max-width:20%;max-height:3rem;object-fit:contain}.room h1{font-size:clamp(1.3rem,3.5vw,3rem);letter-spacing:-.03em;margin:0}.status{background:#e2efe4;border-color:#c9ddcb}.state{font-size:clamp(1.8rem,5vw,4.5rem);letter-spacing:-.035em;line-height:1.1}.available{color:#17653b}.upcoming ul{padding-left:1rem}.upcoming li{font-variant-numeric:tabular-nums}.footer{background:#234b37;border-color:#234b37;color:#fff}.footer small,small{font-size:clamp(.75rem,1vw,.95rem)}@media(max-width:600px){.canvas{padding:.5rem;gap:.3rem;grid-template-rows:repeat(var(--rows),minmax(3rem,1fr))}.block{padding:.4rem}.clock{font-size:1.2rem}}
+  .viewport.fixed:not(.editing){overflow:hidden}.canvas.fixed{box-sizing:border-box;min-height:0;transform-origin:top left;grid-template-rows:repeat(var(--rows),minmax(0,1fr));container-type:size;padding:1.5rem;gap:.7rem}.canvas.fixed .block{min-height:0;padding:1.4rem}.canvas.fixed .clock{font-size:clamp(1.5rem,3cqw,2.8rem)}.canvas.fixed .room h1{font-size:clamp(1.3rem,3.5cqw,3rem)}.canvas.fixed .state{font-size:clamp(1.8rem,5cqw,4.5rem)}.canvas.fixed small{font-size:clamp(.75rem,1cqw,.95rem)}.block{position:relative}.block-label{align-self:flex-start;border:0;background:transparent;padding:0;cursor:pointer}.drag-origin{z-index:0;border:2px dashed #486457;border-radius:.5rem;background:repeating-linear-gradient(135deg,#4864571c 0 8px,transparent 8px 16px);pointer-events:none}.drag-preview{z-index:1;outline:3px solid #17653b;outline-offset:2px;opacity:.88;cursor:grabbing!important}.canvas{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:repeat(var(--rows),minmax(4rem,1fr));gap:.7rem;background:#edeFE8;padding:clamp(.75rem,1.5vw,1.5rem);color:#263f33;font-family:system-ui,sans-serif;min-height:100vh}.block{min-width:0;overflow:auto;background:#fffefa;border:1px solid #dce5db;border-radius:.65rem;padding:clamp(.75rem,1.5vw,1.4rem);display:flex;flex-direction:column;justify-content:center}.editing{min-height:28rem;border-radius:.65rem}.editing .block{cursor:grab}.block-label{font-size:.7rem;color:#486457}.clock{font-size:clamp(1.5rem,3vw,2.8rem);line-height:1;font-variant-numeric:tabular-nums}.branding{flex-direction:row;align-items:center;justify-content:space-between;gap:1rem}.branding img{max-width:20%;max-height:3rem;object-fit:contain}.room h1{font-size:clamp(1.3rem,3.5vw,3rem);letter-spacing:-.03em;margin:0}.status{background:#e2efe4;border-color:#c9ddcb}.state{font-size:clamp(1.8rem,5vw,4.5rem);letter-spacing:-.035em;line-height:1.1}.available{color:#17653b}.upcoming ul{padding-left:1rem}.upcoming li{font-variant-numeric:tabular-nums}.footer{background:#234b37;border-color:#234b37;color:#fff}.footer small,small{font-size:clamp(.75rem,1vw,.95rem)}@media(max-width:600px){.canvas{padding:.5rem;gap:.3rem;grid-template-rows:repeat(var(--rows),minmax(3rem,1fr))}.block{padding:.4rem}.clock{font-size:1.2rem}}
 </style>

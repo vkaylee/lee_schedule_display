@@ -14,6 +14,19 @@ export function gridCell(position, start, size, paddingStart, paddingEnd, gap, c
   return Math.floor((position - start - paddingStart) / (cell + gap));
 }
 
+export function canvasScale(width, height, availableWidth, availableHeight, mode, zoom = 1) {
+  if (!width || !height || !availableWidth) return 1;
+  const fitWidth = availableWidth / width;
+  return mode === 'width' ? fitWidth * zoom : Math.min(fitWidth, (availableHeight || height) / height) * zoom;
+}
+
+export function moveBlock(block, dx, dy, rows) {
+  return {
+    x: Math.max(0, Math.min(12 - block.w, block.x + dx)),
+    y: Math.max(0, Math.min(rows - block.h, block.y + dy))
+  };
+}
+
 export function resizeEdges(block, edges, dx, dy, rows) {
   const left = edges.includes('w') ? Math.max(0, Math.min(block.x + block.w - 1, block.x + dx)) : block.x;
   const right = edges.includes('e') ? Math.min(12, Math.max(block.x + 1, block.x + block.w + dx)) : block.x + block.w;
@@ -27,9 +40,15 @@ export function validDisplayLayout(blocks) {
   const seen = new Set();
   for (const block of blocks) {
     const custom = block?.type === 'text' || block?.type === 'rectangle';
+    const textStyleValid = block?.type !== 'text' ||
+      (block.fontSize === undefined || Number.isInteger(block.fontSize) && block.fontSize >= 8 && block.fontSize <= 256) &&
+      (block.padding === undefined || Number.isInteger(block.padding) && block.padding >= 0 && block.padding <= 128) &&
+      (block.margin === undefined || Number.isInteger(block.margin) && block.margin >= 0 && block.margin <= 128) &&
+      (block.align === undefined || ['left', 'center', 'right'].includes(block.align)) &&
+      (block.valign === undefined || ['top', 'center', 'bottom'].includes(block.valign));
     const key = block?.id || block?.type;
     if (!block || (!custom && !displayBlocks.includes(block.type)) || seen.has(key) ||
-        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) ||
+        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) || !textStyleValid ||
         ![block.x, block.y, block.w, block.h].every(Number.isSafeInteger) ||
         block.x < 0 || block.y < 0 || block.w < 1 || block.h < 1 ||
         block.x + block.w > 12 || block.y + block.h > 24) return false;

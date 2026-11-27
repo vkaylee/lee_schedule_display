@@ -20,9 +20,14 @@ type displayBlock struct {
 	Y     int    `json:"y"`
 	W     int    `json:"w"`
 	H     int    `json:"h"`
-	ID    string `json:"id,omitempty"`
-	Text  string `json:"text,omitempty"`
-	Color string `json:"color,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Color    string `json:"color,omitempty"`
+	FontSize int    `json:"fontSize,omitempty"`
+	Padding  int    `json:"padding,omitempty"`
+	Margin   int    `json:"margin,omitempty"`
+	Align    string `json:"align,omitempty"`
+	VAlign   string `json:"valign,omitempty"`
 }
 type displayConfig struct {
 	Organization string         `json:"organization"`
@@ -58,16 +63,16 @@ func validDisplayConfig(c displayConfig) bool {
 		key := a.Type
 		switch a.Type {
 		case "clock", "branding", "room", "status", "upcoming", "footer":
-			if a.ID != "" || a.Text != "" || a.Color != "" {
+			if a.ID != "" || a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" {
 				return false
 			}
 		case "text":
-			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" {
+			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" || a.FontSize < 0 || a.FontSize > 256 || (a.FontSize > 0 && a.FontSize < 8) || a.Padding < 0 || a.Padding > 128 || a.Margin < 0 || a.Margin > 128 || (a.Align != "" && a.Align != "left" && a.Align != "center" && a.Align != "right") || (a.VAlign != "" && a.VAlign != "top" && a.VAlign != "center" && a.VAlign != "bottom") {
 				return false
 			}
 			key = a.ID
 		case "rectangle":
-			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" {
+			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" || a.FontSize != 0 || a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" {
 				return false
 			}
 			key = a.ID

@@ -15,8 +15,25 @@ import (
 func TestDisplayLayerValidation(t *testing.T) {
 	c := defaultDisplayConfig()
 	c.Blocks = append(c.Blocks, displayBlock{Type: "rectangle", ID: "layer_box", X: 0, Y: 0, W: 4, H: 2, Color: "#ffffff"}, displayBlock{Type: "text", ID: "layer_text", X: 0, Y: 0, W: 4, H: 1, Text: "Hello"})
+	c.Blocks[len(c.Blocks)-1].FontSize = 48
+	c.Blocks[len(c.Blocks)-1].Padding = 12
+	c.Blocks[len(c.Blocks)-1].Margin = 8
+	c.Blocks[len(c.Blocks)-1].Align = "center"
+	c.Blocks[len(c.Blocks)-1].VAlign = "bottom"
 	if !validDisplayConfig(c) {
 		t.Fatal("overlapping layers rejected")
+	}
+	for _, invalid := range []displayBlock{{FontSize: 7}, {FontSize: 257}, {Padding: -1}, {Padding: 129}, {Margin: -1}, {Margin: 129}, {Align: "justify"}, {VAlign: "baseline"}} {
+		candidate := c
+		candidate.Blocks = append([]displayBlock(nil), c.Blocks...)
+		candidate.Blocks[len(candidate.Blocks)-1].FontSize = invalid.FontSize
+		candidate.Blocks[len(candidate.Blocks)-1].Padding = invalid.Padding
+		candidate.Blocks[len(candidate.Blocks)-1].Margin = invalid.Margin
+		candidate.Blocks[len(candidate.Blocks)-1].Align = invalid.Align
+		candidate.Blocks[len(candidate.Blocks)-1].VAlign = invalid.VAlign
+		if validDisplayConfig(candidate) {
+			t.Fatalf("invalid text style accepted: %+v", invalid)
+		}
 	}
 	c.Blocks[len(c.Blocks)-1].ID = "layer_box"
 	if validDisplayConfig(c) {
