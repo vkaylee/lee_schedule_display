@@ -1,0 +1,13 @@
+import { strict as assert } from 'node:assert';
+import { statusAt } from './kiosk-time.js';
+const data = {entries:[{starts:100, ends:200}]};
+assert.equal(statusAt(null, 0, 0, 100), 'Không xác định');
+assert.equal(statusAt(data, 0, 0, 100), 'Không xác định');
+assert.equal(statusAt(data, 2000, 2000, 100), 'Đang họp');
+assert.equal(statusAt(data, 100000, 100000, 100, 5000), 'Không xác định');
+assert.equal(statusAt(data, 102000, 102000, 100), 'Trống');
+assert.equal(statusAt(data, 899999, 899999, 100), 'Trống');
+assert.equal(statusAt(data, 900000, 0, 100), 'Không xác định');
+assert.equal(statusAt(data, 0, 900000, 100), 'Không xác định');
+assert.equal(statusAt(data, 0, -1, 100), 'Không xác định');
+assert.equal(statusAt({...data, valid_until: 150}, 50000, 50000, 100), 'Không xác định');

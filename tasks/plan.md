@@ -58,7 +58,7 @@ Mỗi tác vụ gồm lưu trữ + endpoint + UI phù hợp và test; vị trí 
 - Sau khi người dùng duyệt và thoát plan mode: ghi kế hoạch vào `tasks/plan.md` và checklist `tasks/todo.md` theo yêu cầu skill, rồi mới triển khai nếu được yêu cầu. Hai file này chưa được tạo vì plan mode chỉ cho phép sửa file kế hoạch hiện tại.
 
 ## Điểm cần làm rõ trước tác vụ liên quan
-- Chính sách chính xác cho ngoại lệ đã sửa khi chỉnh quy tắc toàn chuỗi hoặc tách chuỗi làm occurrence gốc biến mất; tuyệt đối không tự xóa ngoại lệ.
-- Chính sách xử lý giờ địa phương không tồn tại/mơ hồ nếu múi giờ cấu hình có DST.
+- Nếu chỉnh hoặc tách chuỗi khiến occurrence gốc của ngoại lệ biến mất, từ chối thay đổi và yêu cầu xử lý ngoại lệ trước; không tự xóa.
+- Với giờ địa phương không tồn tại hoặc mơ hồ do DST, từ chối và giải thích để người dùng chọn thời điểm khác.
 - Nơi chạy HTTPS nội bộ và phương pháp cấp chứng chỉ tin cậy cho máy quản trị và kiosk.
 - Khoảng kiểm tra 12 tháng là giới hạn có chủ đích; ghi rõ tới người dùng, kể cả đối với chuỗi có ngày kết thúc xa.

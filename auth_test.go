@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -48,7 +50,7 @@ func TestProxyLoginLimit(t *testing.T) {
 		want         []int
 	}{
 		{"proxy clients", "192.0.2.10:123", proxy, []string{"198.51.100.1", "198.51.100.1", "198.51.100.1", "198.51.100.1", "198.51.100.1", "198.51.100.1", "198.51.100.2"}, []int{400, 400, 400, 400, 400, 429, 400}},
-		{"ipv6 clients", "[2001:db8::10]:123", netip.MustParseAddr("2001:db8::10"), []string{"2001:db8::1", "2001:0db8:0:0:0:0:0:1", "2001:db8::1", "2001:db8::1", "2001:db8::1", "2001:db8::1", "2001:db8::2"}, []int{400, 400, 400, 400, 400, 429, 400}},
+		{"ipv6 clients", "[2001:db8::10]:123", netip.MustParseAddr("2001:db8::10"), []string{"2001:db8::1", "2001:db8::2", "2001:db8::3", "2001:db8::4", "2001:db8::5", "2001:db8::6", "2001:db8:0:1::1"}, []int{400, 400, 400, 400, 400, 429, 400}},
 		{"spoof", "192.0.2.11:123", proxy, []string{"198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4", "198.51.100.5", "198.51.100.6"}, []int{400, 400, 400, 400, 400, 429}},
 		{"default", "192.0.2.10:123", netip.Addr{}, []string{"198.51.100.1", "198.51.100.2", "198.51.100.3", "198.51.100.4", "198.51.100.5", "198.51.100.6"}, []int{400, 400, 400, 400, 400, 429}},
 	} {
@@ -67,6 +69,46 @@ func TestProxyLoginLimit(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLoginLimitCapacity(t *testing.T) {
+	now := time.Now()
+	limit := &loginLimit{attempts: make(map[string][]time.Time)}
+	for i := 0; i < 10000; i++ {
+		limit.attempts[netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}).String()] = []time.Time{now}
+	}
+	if limit.allow("192.0.2.1") {
+		t.Fatal("new client allowed while table is full")
+	}
+	for i := 0; i < 4; i++ {
+		if !limit.allow("10.0.0.0") {
+			t.Fatal("existing client blocked below its limit")
+		}
+	}
+	if limit.allow("10.0.0.0") {
+		t.Fatal("existing client exceeded its limit")
+	}
+	limit.attempts["10.0.0.1"] = []time.Time{now.Add(-16 * time.Minute)}
+	if !limit.allow("192.0.2.1") {
+		t.Fatal("expired entry did not free capacity")
+	}
+}
+
+func TestLoginLimitConcurrent(t *testing.T) {
+	limit := &loginLimit{attempts: make(map[string][]time.Time)}
+	var allowed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Go(func() {
+			if limit.allow("192.0.2.1") {
+				allowed.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if allowed.Load() != 5 {
+		t.Fatalf("allowed %d requests, want 5", allowed.Load())
 	}
 }
 

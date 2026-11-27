@@ -1,15 +1,15 @@
 # Checklist triển khai MVP
 
-Chi tiết, điều kiện nghiệm thu, kiểm thử và phụ thuộc: xem [plan.md](plan.md). Chưa bắt đầu triển khai.
+Chi tiết, điều kiện nghiệm thu, kiểm thử và phụ thuộc: xem [plan.md](plan.md). Tác vụ 1 chưa hoàn tất: rủi ro giới hạn đăng nhập và kiểm thử trên hạ tầng proxy thực còn chặn triển khai; bằng chứng và đề xuất tại [auth-threat-model.md](auth-threat-model.md).
 
-- [ ] 1. Bootstrap tài khoản đầu tiên và đăng nhập an toàn.
-- [ ] 2. Quản lý tài khoản quản trị.
+- [ ] 1. Bootstrap tài khoản đầu tiên và đăng nhập an toàn. Tạm bỏ qua theo yêu cầu; các rủi ro và kiểm thử proxy thực vẫn chưa được giải quyết, không coi là sẵn sàng triển khai.
+- [x] 2. Quản lý tài khoản quản trị. Đã kiểm thử API, giao diện, giao dịch cạnh tranh và rà soát bảo mật; checkpoint A vẫn phụ thuộc proxy triển khai thực.
 - [ ] Checkpoint A: HTTPS, tài khoản và kiểm tra truy cập.
-- [ ] 3. Quản lý phòng và cấu hình riêng tư.
-- [ ] 4. Đặt lịch một lần, kiểm tra trùng nguyên tử.
+- [x] 3. Quản lý phòng và cấu hình riêng tư. Đã kiểm thử API, trình duyệt và lưu lịch khi phòng bị vô hiệu hóa; đã xử lý các điểm rà soát phòng.
+- [ ] 4. Đặt lịch một lần, kiểm tra trùng nguyên tử. Đã có API, giao diện múi giờ chung, test cạnh tranh, DST và trình duyệt; đã bổ sung kiểm soát phiên bản và thử lại trình duyệt. Còn kiểm thử hạ tầng thực tại checkpoint B.
 - [ ] Checkpoint B: kiểm thử đặt trùng đồng thời và lưu bền vững.
-- [ ] 5. Ghép thiết bị và hiển thị lịch trên kiosk.
-- [ ] 6. Xử lý mất kết nối và dữ liệu quá 15 phút.
+- [ ] 5. Ghép thiết bị và hiển thị lịch trên kiosk. Đã có đăng ký, ghép, thu hồi, quyền đọc theo phòng; đã rà soát bảo mật và sửa các vấn đề phát hiện. Còn kiểm thử kiosk thực và trạng thái biên.
+- [ ] 6. Xử lý mất kết nối và dữ liệu quá 15 phút. Đã kiểm thử Chrome chuyển Không xác định khi mất kết nối và phục hồi; còn kiểm thử đồng hồ/tab ngủ và lưu lịch sau khởi động lại. Cách xử lý hiện tại ưu tiên an toàn hơn hiển thị offline theo kế hoạch.
 - [ ] Checkpoint C: kiểm thử kiosk, thu hồi và riêng tư.
 - [ ] 7. Tạo và xem lịch lặp có giới hạn.
 - [ ] 8. Sửa hoặc hủy một buổi trong chuỗi.

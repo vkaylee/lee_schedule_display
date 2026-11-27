@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 1 {
+	if version > 6 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -40,6 +40,39 @@ func migrate(db *sql.DB) error {
 CREATE TABLE sessions (token_hash BLOB PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires INTEGER NOT NULL);
 PRAGMA user_version = 1`)
 		if err != nil {
+			return err
+		}
+	}
+	if version <= 1 {
+		if _, err := tx.Exec(`ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1));
+CREATE TABLE account_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, target_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
+PRAGMA user_version = 2`); err != nil {
+			return err
+		}
+	}
+	if version <= 2 {
+		if _, err := tx.Exec(`CREATE TABLE rooms (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), show_title INTEGER NOT NULL DEFAULT 0 CHECK (show_title IN (0,1)), show_organizer INTEGER NOT NULL DEFAULT 0 CHECK (show_organizer IN (0,1)));
+PRAGMA user_version = 3`); err != nil {
+			return err
+		}
+	}
+	if version <= 3 {
+		if _, err := tx.Exec(`CREATE TABLE bookings (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)));
+CREATE INDEX bookings_room_time ON bookings(room_id, starts, ends) WHERE canceled = 0;
+CREATE TABLE booking_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, booking_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
+PRAGMA user_version = 4`); err != nil {
+			return err
+		}
+	}
+	if version <= 4 {
+		if _, err := tx.Exec(`CREATE TABLE devices (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, token_hash BLOB NOT NULL UNIQUE, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), last_seen INTEGER);
+PRAGMA user_version = 5`); err != nil {
+			return err
+		}
+	}
+	if version <= 5 {
+		if _, err := tx.Exec(`ALTER TABLE bookings ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+PRAGMA user_version = 6`); err != nil {
 			return err
 		}
 	}
@@ -147,6 +180,10 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 			}
 			client = client.Unmap()
 		}
+		// ponytail: /64 groups common IPv6 subnets; add a deployment-specific policy if prefixes vary.
+		if client.Is6() {
+			client = netip.PrefixFrom(client, 64).Masked().Addr()
+		}
 		if !limit.allow(client.String()) {
 			http.Error(w, "too many requests", 429)
 			return
@@ -163,7 +200,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 		}
 		var id int64
 		var salt, hash []byte
-		err = db.QueryRow("SELECT id, salt, password_hash FROM users WHERE username = ?", input.Username).Scan(&id, &salt, &hash)
+		err = db.QueryRow("SELECT id, salt, password_hash FROM users WHERE username = ? AND active = 1", input.Username).Scan(&id, &salt, &hash)
 		if err != nil && err != sql.ErrNoRows {
 			http.Error(w, "internal error", 500)
 			return
@@ -192,8 +229,13 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 			return
 		}
 		expires := time.Now().Add(sessionDuration)
-		if _, err = db.Exec("INSERT INTO sessions (token_hash, user_id, csrf, expires) VALUES (?, ?, ?, ?)", tokenHash(token), id, csrf, expires.Unix()); err != nil {
+		result, err := db.Exec("INSERT INTO sessions (token_hash, user_id, csrf, expires) SELECT ?, id, ?, ? FROM users WHERE id = ? AND active = 1 AND password_hash = ? AND salt = ?", tokenHash(token), csrf, expires.Unix(), id, hash, salt)
+		if err != nil {
 			http.Error(w, "internal error", 500)
+			return
+		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			http.Error(w, "invalid credentials", 401)
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: "__Host-session", Value: token, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(sessionDuration.Seconds())})
@@ -209,7 +251,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 		}
 		c := cookies[0]
 		var username, csrf string
-		err := db.QueryRow("SELECT users.username, sessions.csrf FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires > ?", tokenHash(c.Value), time.Now().Unix()).Scan(&username, &csrf)
+		err := db.QueryRow("SELECT users.username, sessions.csrf FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires > ? AND users.active = 1", tokenHash(c.Value), time.Now().Unix()).Scan(&username, &csrf)
 		if err == sql.ErrNoRows {
 			http.Error(w, "unauthorized", 401)
 			return "", "", "", false
@@ -244,6 +286,10 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 		http.SetCookie(w, &http.Cookie{Name: "__Host-session", Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 		w.WriteHeader(204)
 	}))
+	registerUserHandlers(mux, db, post, session)
+	registerRoomHandlers(mux, db, post, session)
+	registerBookingHandlers(mux, db, post, session)
+	registerDeviceHandlers(mux, db, post, session)
 	return mux
 }
 

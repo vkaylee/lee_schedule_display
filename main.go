@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
@@ -22,6 +23,10 @@ var assets embed.FS
 func handler() http.Handler { return handlerWithAuth(nil, "", netip.Addr{}) }
 
 func handlerWithAuth(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handler {
+	return handlerWithTimezone(db, origin, trustedProxy, time.UTC)
+}
+
+func handlerWithTimezone(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *time.Location) http.Handler {
 	dist, err := fs.Sub(assets, "web/dist")
 	if err != nil {
 		panic(err)
@@ -35,11 +40,24 @@ func handlerWithAuth(db *sql.DB, origin string, trustedProxy netip.Addr) http.Ha
 	mux.MethodFunc(http.MethodHead, "/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 	})
+	mux.Get("/api/timezone", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"timezone": timezone.String()})
+	})
 	if db != nil {
 		auth := authHandler(db, origin, trustedProxy)
 		mux.Handle("/api/login", auth)
 		mux.Handle("/api/logout", auth)
 		mux.Handle("/api/session", auth)
+		mux.Handle("/api/users", auth)
+		mux.Handle("/api/users/*", auth)
+		mux.Handle("/api/rooms", auth)
+		mux.Handle("/api/rooms/*", auth)
+		mux.Handle("/api/bookings", auth)
+		mux.Handle("/api/bookings/*", auth)
+		mux.Handle("/api/devices", auth)
+		mux.Handle("/api/devices/*", auth)
+		mux.Handle("/api/kiosk", auth)
 	}
 	mux.HandleFunc("/api/*", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +103,8 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	// ponytail: one process serializes SQLite writes; use a shared busy timeout for multi-process deployments.
+	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		log.Fatal(err)
 	}
@@ -118,7 +138,15 @@ func main() {
 			log.Fatal("TRUSTED_PROXY_IP must be a single IP address without a zone")
 		}
 	}
-	server := newServer(handlerWithAuth(db, origin, trustedProxy))
+	zone := os.Getenv("APP_TIMEZONE")
+	if zone == "" {
+		zone = "UTC"
+	}
+	timezone, err := time.LoadLocation(zone)
+	if err != nil || zone == "Local" {
+		log.Fatal("APP_TIMEZONE must be a valid IANA timezone")
+	}
+	server := newServer(handlerWithTimezone(db, origin, trustedProxy, timezone))
 	if addr := os.Getenv("LISTEN_ADDR"); addr != "" {
 		server.Addr = addr
 	}
