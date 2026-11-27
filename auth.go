@@ -32,7 +32,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 8 {
+	if version > 9 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -85,6 +85,12 @@ PRAGMA user_version = 7`); err != nil {
 	if version <= 7 {
 		if _, err := tx.Exec(`ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
 PRAGMA user_version = 8`); err != nil {
+			return err
+		}
+	}
+	if version <= 8 {
+		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN display_config TEXT NOT NULL DEFAULT '';
+PRAGMA user_version = 9`); err != nil {
 			return err
 		}
 	}
@@ -341,6 +347,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr) http.Handle
 	registerRoomHandlers(mux, db, post, session)
 	registerBookingHandlers(mux, db, post, session)
 	registerDeviceHandlers(mux, db, post, session)
+	registerDisplayHandlers(mux, db, post, session)
 	return mux
 }
 

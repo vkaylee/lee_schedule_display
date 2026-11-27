@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import DisplayEditor from './DisplayEditor.svelte';
+  let editing = $state(null);
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let devices = $state([]), rooms = $state([]), name = $state(''), roomId = $state(''), token = $state(''), error = $state(''), busy = $state(false);
@@ -46,7 +48,8 @@
   <h2 id="device-heading">{t('Thiết bị màn hình', 'Display devices')}</h2>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if token}<p role="status">{t('Mã thiết bị chỉ hiển thị một lần. Nhập mã trên màn hình phòng:', 'The device token is shown only once. Enter it on the room display:')}</p><output aria-label={t('Mã thiết bị', 'Device token')}>{token}</output><button type="button" onclick={() => token = ''}>{t('Ẩn mã', 'Hide token')}</button>{/if}
-  <ul>{#each devices as device (device.id)}<li>{device.name} — {rooms.find(r => r.id === device.room_id)?.name} — {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')} — {device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}{#if !device.revoked}<label>{t('Ngôn ngữ', 'Language')} {device.name} <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><button type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>{t('Thu hồi', 'Revoke')}</button>{/if}</li>{/each}</ul>
+  <ul>{#each devices as device (device.id)}<li>{device.name} — {rooms.find(r => r.id === device.room_id)?.name} — {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')} — {device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}{#if !device.revoked}<button type="button" disabled={busy || editing !== null} onclick={() => editing = device}>{t('Thiết kế màn hình', 'Design display')}</button><label>{t('Ngôn ngữ', 'Language')} {device.name} <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}><option value="vi">Tiếng Việt</option><option value="en">English</option></select></label><button type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>{t('Thu hồi', 'Revoke')}</button>{/if}</li>{/each}</ul>
+  {#if editing}<DisplayEditor device={editing} {csrf} onclose={() => editing = null} />{/if}
   <form onsubmit={create}><h3>{t('Đăng ký thiết bị', 'Register device')}</h3><label for="device-name">{t('Tên thiết bị', 'Device name')}</label><input id="device-name" bind:value={name} maxlength="128" required /><label for="device-room">{t('Phòng thiết bị', 'Device room')}</label><select id="device-room" bind:value={roomId} required><option value="">{t('Chọn phòng', 'Select room')}</option>{#each rooms.filter(r => r.active) as room}<option value={String(room.id)}>{room.name}</option>{/each}</select><button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button></form>
 </section>
 <style>section { margin-top:2rem; padding-top:1.5rem; border-top:1px solid #c9d7d9 } form { display:grid; gap:.5rem } input, select, button { font:inherit } li, output { overflow-wrap:anywhere } [role='alert'] { color:#7d261e }</style>

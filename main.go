@@ -59,6 +59,7 @@ func handlerWithTimezone(db *sql.DB, origin string, trustedProxy netip.Addr, tim
 		mux.Handle("/api/devices", auth)
 		mux.Handle("/api/devices/*", auth)
 		mux.Handle("/api/kiosk", auth)
+		mux.Handle("/api/display/*", auth)
 	}
 	mux.HandleFunc("/api/*", func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {

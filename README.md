@@ -23,6 +23,12 @@ Schema phiên bản 2 bổ sung trạng thái tài khoản và nhật ký; phiê
 
 Kiosk chưa có watchdog độc lập: nếu luồng trình duyệt bị treo hoặc hẹn giờ trễ quá 30 giây, màn hình có thể tiếp tục báo Trống sau khi cuộc họp bắt đầu. Nếu thiết bị ngủ và đồng hồ bị chỉnh đồng thời mà không có sự kiện vòng đời, hai đồng hồ có thể không phát hiện sai lệch. Không dùng kiosk làm nguồn quyết định phòng trống đáng tin cậy cho đến khi có watchdog độc lập hoặc giải pháp thiết bị tương đương và kiểm thử thực tế.
 
+## Màn hình thiết bị công khai
+
+Trong danh sách thiết bị, chọn **Thiết kế màn hình**, chỉnh các khối và lưu. Mỗi thiết bị hoạt động có URL `/display/{id}` không cần đăng nhập; ID dễ đoán và bất kỳ ai có thể truy cập URL đều xem được tên phòng, tên tổ chức, logo, trạng thái và giờ lịch. API không trả tên cuộc họp hay người đặt. Thu hồi thiết bị hoặc ngừng phòng sẽ ngắt truy cập dữ liệu công khai. Logo chỉ nhận đường dẫn nội bộ, ví dụ `/logo.png`; hiện chưa có chức năng tải logo.
+
+Schema phiên bản 9 lưu bố cục riêng theo thiết bị; sao lưu nhất quán trước nâng cấp. Để quay về bản cũ, khôi phục bản sao lưu trước nâng cấp và đối soát thay đổi sau sao lưu; không ghi đè dữ liệu đang dùng nếu chưa được duyệt. Màn hình công khai dùng cùng giới hạn đồng hồ và mất mạng như kiosk nêu trên, chưa có watchdog độc lập và chưa sẵn sàng làm nguồn quyết định phòng trống đáng tin cậy.
+
 ## Sao lưu thử nghiệm
 
 Sau khi build, chạy `./schedule-display backup /path/to/schedule.db /path/to/new-backup.db`. Nguồn được mở chỉ đọc; SQLite tạo snapshot nhất quán. Khi dùng rollback journal, snapshot có thể chặn commit và khiến ứng dụng trả lỗi `SQLITE_BUSY`; chưa kiểm thử và xử lý đầy đủ tương tranh này. Chỉ sao lưu khi đã dừng ghi cho đến khi cơ chế chờ và kiểm thử đồng thời được xác minh. Đích phải chưa tồn tại, không có hậu tố `-wal`, `-shm`, `-journal`, và nằm trên filesystem hỗ trợ hard link; bản sao có quyền `0600`. Không dùng bản sao lưu làm DB đang chạy. Bảo vệ thư mục sao lưu, quyền truy cập và vị trí lưu như dữ liệu gốc; chưa có mã hóa hay chính sách lưu giữ tự động. Nếu tiến trình bị dừng đột ngột, thư mục ẩn `.sqlite-backup-*` có thể còn lại và chứa dữ liệu nhạy cảm; kiểm tra trước khi xóa thủ công.

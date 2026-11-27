@@ -4,6 +4,8 @@
   import Bookings from './Bookings.svelte';
   import Devices from './Devices.svelte';
   import Kiosk from './Kiosk.svelte';
+  import PublicDisplay from './PublicDisplay.svelte';
+  const displayMatch = window.location.pathname.match(/^\/display\/([1-9][0-9]*)$/);
 
   let t;
   $: t = session?.language === 'en' ? (_vi, en) => en : (vi, _en) => vi;
@@ -199,13 +201,15 @@
     }
   }
 
-  if (window.location.pathname !== '/kiosk') onMount(loadSession);
+  if (window.location.pathname !== '/kiosk' && !displayMatch) onMount(loadSession);
 </script>
 
 <svelte:head><title>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</title></svelte:head>
 
 {#if window.location.pathname === '/kiosk'}
   <Kiosk />
+{:else if displayMatch}
+  <PublicDisplay id={displayMatch[1]} />
 {:else}
 <main>
   <div class="panel">
