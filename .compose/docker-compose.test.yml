@@ -1,0 +1,17 @@
+services:
+  go:
+    profiles: ["unit-go", "int-go", "lint-go"]
+    image: lee-schedule-display-toolchain:local
+    build:
+      context: ..
+      dockerfile: .compose/Dockerfile
+    working_dir: /workspace
+    command: ["sleep", "infinity"]
+    volumes:
+      - ..:/workspace
+      - test_modules:/workspace/web/node_modules
+      - test_dist:/workspace/web/dist
+
+volumes:
+  test_modules:
+  test_dist:

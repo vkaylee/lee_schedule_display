@@ -1,0 +1,41 @@
+# Frontend dependencies and build output
+/web/node_modules/
+/web/dist/
+
+# Go and development output
+/tmp/
+/schedule-display
+*.test
+*.out
+
+# SQLite data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Test artifacts
+/.test_logs/
+/playwright-report/
+/test-results/
+/web/playwright-report/
+/web/test-results/
+
+# Local editor and OS files
+.DS_Store
+.vscode/
+.idea/
+.claude/settings.local.json

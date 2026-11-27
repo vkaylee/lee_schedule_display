@@ -1,0 +1,47 @@
+[project]
+name = "lee_schedule_display"
+namespace = "lee-schedule-display"
+languages = ["go", "typescript"]
+
+[services.go]
+lang = "go"
+go = true
+ports = [8080]
+health_check = "/api/health"
+
+[test.dependencies]
+unit-go = ["go"]
+int-go = ["go"]
+lint-go = ["go"]
+
+[test.gates.unit-go]
+command = ["go", "test", "./..."]
+setup_command = ["sh", "-c", "bun install --cwd web --frozen-lockfile && bun run --cwd web build"]
+
+[test.gates.int-go]
+setup_command = ["sh", "-c", "bun install --cwd web --frozen-lockfile && bun run --cwd web build"]
+
+[test.gates.lint-go]
+command = ["go", "vet", "./..."]
+setup_command = ["sh", "-c", "bun install --cwd web --frozen-lockfile && bun run --cwd web build"]
+
+[targets]
+go = ["go"]
+all = ["go"]
+
+[ai]
+extra_rules = []
+rules_dir = ".agent/rules"
+override_manifest = ".agent/overrides.yaml"
+
+[ai.model_routing]
+enabled = false
+default_model = "sonnet"
+
+[addons]
+skills = []
+
+[mcp.playwright]
+endpoint = "http://go:8080"
+network = "lee-schedule-display-dev_default"
+login_path = "/"

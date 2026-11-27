@@ -1,0 +1,21 @@
+services:
+  go:
+    image: lee-schedule-display-toolchain:local
+    build:
+      context: .
+      dockerfile: .compose/Dockerfile
+    working_dir: /workspace
+    command: ["sh", "-c", "bun install --cwd web --frozen-lockfile && exec air"]
+    environment:
+      DATABASE_PATH: /data/schedule.db
+    ports:
+      # Without APP_PORT, Docker selects a free host port; find it with `docker compose port go 8080`.
+      - "127.0.0.1:${APP_PORT:-}:8080"
+    volumes:
+      - .:/workspace
+      - web_modules:/workspace/web/node_modules
+      - dev_data:/data
+
+volumes:
+  web_modules:
+  dev_data:
