@@ -1,12 +1,12 @@
 # Chuyển phòng từ màn hình sang widget
 
-Status: Approved
+Status: Approved — ứng dụng chưa go live; người dùng đã cho phép loại bỏ kiosk cũ và liên kết phòng trên màn hình, không cần giai đoạn tương thích consumer.
 
 ## Mục tiêu và hợp đồng
 
 - Màn hình không có phòng mặc định; mỗi widget `room`, `status`, `upcoming` chọn một phòng riêng. Cho phép nhiều instance cùng loại, mỗi instance có ID ổn định. Widget chung không có `roomId`.
 - Màn hình công khai chỉ trả dữ liệu cần thiết theo các phòng được chọn, không lộ tiêu đề hoặc người tổ chức. Giới hạn số widget/phòng, deduplicate truy vấn và tính độ tin cậy lịch riêng từng phòng. Phòng không khả dụng chỉ ảnh hưởng widget của phòng đó.
-- Ngừng kiosk token cũ theo lựa chọn của người dùng. Kiểm kê consumer và thông báo thay đổi hợp đồng trước khi loại bỏ; không âm thầm thu hồi dữ liệu hoặc token hiện có.
+- Loại bỏ kiosk token cũ theo quyết định mới của người dùng: ứng dụng chưa go live và không cần duy trì tương thích kiosk.
 - Migration phải giữ cấu hình, ID công khai, trạng thái thiết bị, bố cục và liên kết phòng hiện hữu; cấu hình rỗng dùng bố cục mặc định tương đương. Không thay đổi dữ liệu đặt phòng.
 - Triển khai theo expand → migrate → verify → contract. Không xóa `devices.room_id` hoặc ngừng API cũ trước khi xác nhận consumer đã chuyển và có phương án rollback; trạng thái đích không còn liên kết phòng ở màn hình.
 

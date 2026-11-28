@@ -330,16 +330,25 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			}
 			rooms[key] = loadPublicRoom(tx, block.RoomID, now)
 		}
+		legacy := publicRoom{Entries: []publicEntry{}, ValidUntil: &now, Unavailable: true}
+		if legacyRoom.Valid && legacyDisplayMatches(c, legacyRoom.Int64) {
+			if room, ok := rooms[strconv.FormatInt(legacyRoom.Int64, 10)]; ok && !room.Unavailable {
+				legacy = room
+			}
+		}
 		if err = tx.Commit(); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
-			Config   displayConfig         `json:"config"`
-			Language string                `json:"language"`
-			Now      int64                 `json:"now"`
-			Rooms    map[string]publicRoom `json:"rooms"`
-		}{c, language, now, rooms})
+			Config     displayConfig         `json:"config"`
+			Language   string                `json:"language"`
+			Now        int64                 `json:"now"`
+			Rooms      map[string]publicRoom `json:"rooms"`
+			Room       string                `json:"room"`
+			Entries    []publicEntry         `json:"entries"`
+			ValidUntil *int64                `json:"valid_until"`
+		}{c, language, now, rooms, legacy.Room, legacy.Entries, legacy.ValidUntil})
 	})
 }

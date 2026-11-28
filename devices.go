@@ -246,6 +246,26 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			return
 		}
 		defer tx.Rollback()
+		var raw string
+		var assignedRoom sql.NullInt64
+		err = tx.QueryRow("SELECT display_config,room_id FROM devices WHERE token_hash=? AND revoked=0", tokenHash(token)).Scan(&raw, &assignedRoom)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		config, err := readDisplayConfig(raw, assignedRoom.Int64)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		if !assignedRoom.Valid || !legacyDisplayMatches(config, assignedRoom.Int64) {
+			http.Error(w, "kiosk room assignment unavailable; use public display", http.StatusConflict)
+			return
+		}
 		if _, err = tx.Exec("UPDATE devices SET last_seen=? WHERE token_hash=? AND revoked=0", now, tokenHash(token)); err != nil {
 			http.Error(w, "internal error", 500)
 			return

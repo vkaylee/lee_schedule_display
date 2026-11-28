@@ -35,6 +35,23 @@ func readDisplayConfig(raw string, roomID int64) (displayConfig, error) {
 	return c, nil
 }
 
+func legacyDisplayMatches(c displayConfig, roomID int64) bool {
+	if roomID <= 0 {
+		return false
+	}
+	found := false
+	for _, block := range c.Blocks {
+		if block.Type != "room" && block.Type != "status" && block.Type != "upcoming" {
+			continue
+		}
+		if block.RoomID != roomID {
+			return false
+		}
+		found = true
+	}
+	return found
+}
+
 func loadPublicRoom(tx *sql.Tx, roomID, now int64) publicRoom {
 	unavailable := publicRoom{Entries: []publicEntry{}, Unavailable: true}
 	var result publicRoom

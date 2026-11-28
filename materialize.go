@@ -15,7 +15,7 @@ type storedSeriesRule struct {
 
 func displayCoverage(query interface{ QueryRow(string, ...any) *sql.Row }, roomID, now int64) (sql.NullInt64, error) {
 	var cutoff sql.NullInt64
-	err := query.QueryRow(`SELECT MIN(CASE WHEN c.starts IS NULL THEN MAX(?,COALESCE(CAST(strftime('%s',json_extract(s.rule,'$.rule.Start')) AS INTEGER),?)) WHEN c.starts>? THEN c.starts WHEN c.ends<=? THEN ? ELSE c.ends END) FROM booking_series s LEFT JOIN materialization_coverage c ON c.series_id=s.id WHERE s.canceled=0 AND s.room_id=? AND json_extract(s.rule,'$.rule.Count')=0 AND json_extract(s.rule,'$.rule.Until')='0001-01-01T00:00:00Z'`, now, now, now, now, now, roomID).Scan(&cutoff)
+	err := query.QueryRow(`SELECT MIN(CASE WHEN c.starts IS NULL THEN MAX(?,COALESCE(CAST(strftime('%s',json_extract(s.rule,'$.rule.Start')) AS INTEGER),?)) WHEN c.starts>? THEN c.starts WHEN c.ends<=? THEN ? ELSE c.ends END) FROM booking_series s LEFT JOIN materialization_coverage c ON c.series_id=s.id WHERE s.canceled=0 AND (s.room_id=? OR EXISTS (SELECT 1 FROM series_occurrences o WHERE o.series_id=s.id AND o.room_id=? AND o.canceled=0 AND o.ends>?)) AND json_extract(s.rule,'$.rule.Count')=0 AND json_extract(s.rule,'$.rule.Until')='0001-01-01T00:00:00Z'`, now, now, now, now, now, roomID, roomID, now).Scan(&cutoff)
 	return cutoff, err
 }
 
