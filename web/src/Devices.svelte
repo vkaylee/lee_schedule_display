@@ -2,11 +2,15 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import Modal from './Modal.svelte';
   import DisplayEditor from './DisplayEditor.svelte';
+  let confirmDialog = $state();
   let editing = $state(null);
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), error = $state(''), busy = $state(false);
+  let createModalOpen = $state(false), createError = $state('');
   async function load() {
     error = '';
     try {
@@ -16,13 +20,24 @@
     } catch { error = ['Không thể tải thiết bị.', 'Could not load devices.']; }
     finally { loading = false; }
   }
+  function openCreate() {
+    name = '';
+    createError = '';
+    createModalOpen = true;
+  }
+  function closeCreateModal() {
+    if (busy) return;
+    createModalOpen = false;
+    createError = '';
+    name = '';
+  }
   async function create(event) {
-    event.preventDefault(); busy = true; error = '';
+    event.preventDefault(); busy = true; createError = '';
     try {
       const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
       if (!response.ok) throw new Error();
-      name = ''; await load();
-    } catch { error = ['Không thể tạo thiết bị.', 'Could not create device.']; }
+      createModalOpen = false; name = ''; await load();
+    } catch { createError = ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
   }
   async function setLanguage(device, event) {
@@ -37,7 +52,7 @@
     finally { busy = false; }
   }
   async function revoke(device) {
-    if (!window.confirm(t(`Thu hồi thiết bị ${device.name}?`, `Revoke device ${device.name}?`))) return;
+    if (!await confirmDialog.ask(t(`Thu hồi thiết bị ${device.name}?`, `Revoke device ${device.name}?`))) return;
     busy = true; error = '';
     try {
       const response = await fetch(`/api/devices/${device.id}/revoke`, {method:'POST',headers:{'X-CSRF-Token':csrf}});
@@ -62,12 +77,20 @@
   });
 </script>
 
+<ConfirmDialog bind:this={confirmDialog} {language} />
+
 <section aria-labelledby="device-heading">
   <div class="section-head">
     <div>
       <p class="section-kicker">{t('PHẦN CỨNG & HIỂN THỊ', 'HARDWARE & DISPLAYS')}</p>
       <h2 id="device-heading">{t('Thiết bị màn hình', 'Display devices')}</h2>
       <p>{t('Cấu hình ngôn ngữ và thiết kế màn hình hiển thị nhiều phòng.', 'Configure language and design displays for multiple rooms.')}</p>
+    </div>
+    <div class="section-actions">
+      <button type="button" disabled={busy} onclick={openCreate}>
+        <Icon name="plus" />
+        <span>{t('Đăng ký thiết bị', 'Register device')}</span>
+      </button>
     </div>
   </div>
 
@@ -77,75 +100,82 @@
     <DisplayEditor device={editing} {rooms} {csrf} {language} onclose={() => editing = null} />
   {/if}
 
-  <div class="ui-split">
-    <div>
-      {#if loading}
-        <p class="ui-loading" role="status">
-          <span class="ui-spinner" aria-hidden="true"></span>
-          <span>{t('Đang tải thiết bị…', 'Loading devices…')}</span>
-        </p>
-      {:else if devices.length === 0}
-        <div class="ui-empty">
-          <strong>{t('Chưa có thiết bị nào.', 'No devices registered yet.')}</strong>
-          <p>{t('Đăng ký thiết bị để tạo màn hình công khai.', 'Register a device to create a public display.')}</p>
-        </div>
-      {:else}
-        <ul class="ui-card-list">
-          {#each devices as device (device.id)}
-            <li class="ui-card device-card" class:is-revoked={device.revoked} class:is-editing={editing?.id === device.id}>
-              <div class="device-info">
-                <div class="device-title-row">
-                  <strong>{device.name}</strong>
-                  <span class={device.revoked ? 'ui-pill ui-pill--danger' : 'ui-pill ui-pill--success'}>
-                    {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')}
-                  </span>
-                </div>
+  <div class="ui-view-body">
+    {#if loading}
+      <p class="ui-loading" role="status">
+        <span class="ui-spinner" aria-hidden="true"></span>
+        <span>{t('Đang tải thiết bị…', 'Loading devices…')}</span>
+      </p>
+    {:else if devices.length === 0}
+      <div class="ui-empty">
+        <strong>{t('Chưa có thiết bị nào.', 'No devices registered yet.')}</strong>
+        <p>{t('Bấm "Đăng ký thiết bị" để tạo màn hình công khai.', 'Click "Register device" to create a public display.')}</p>
+      </div>
+    {:else}
+      <ul class="ui-card-list">
+        {#each devices as device (device.id)}
+          <li class="ui-card device-card" class:is-revoked={device.revoked} class:is-editing={editing?.id === device.id}>
+            <div class="device-info">
+              <div class="device-title-row">
+                <strong>{device.name}</strong>
+                <span class={device.revoked ? 'ui-pill ui-pill--danger' : 'ui-pill ui-pill--success'}>
+                  {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')}
+                </span>
               </div>
+            </div>
 
-              <div class="device-controls">
-                {#if !device.revoked}
-                  <button class="secondary" type="button" disabled={busy || editing !== null} onclick={() => editing = device}>
-                    <Icon name="layout" />
-                    <span>{t('Thiết kế màn hình', 'Design display')}</span>
-                  </button>
+            <div class="device-controls">
+              {#if !device.revoked}
+                <button class="secondary" type="button" disabled={busy || editing !== null} onclick={() => editing = device}>
+                  <Icon name="layout" />
+                  <span>{t('Thiết kế màn hình', 'Design display')}</span>
+                </button>
 
-                  <label class="inline-lang">
-                    <span>{t('Ngôn ngữ', 'Language')} <span class="sr-only">{device.name}</span></span>
-                    <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}>
-                      <option value="vi">Tiếng Việt</option>
-                      <option value="en">English</option>
-                    </select>
-                  </label>
+                <label class="inline-lang">
+                  <span>{t('Ngôn ngữ', 'Language')} <span class="sr-only">{device.name}</span></span>
+                  <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}>
+                    <option value="vi">Tiếng Việt</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
 
-                  <a class="display-link" href={`/display/${device.public_id}`} target="_blank" rel="noopener noreferrer">
-                    <span>{t('Mở màn hình', 'Open display')}</span>
-                    <Icon name="external" />
-                  </a>
+                <a class="display-link" href={`/display/${device.public_id}`} target="_blank" rel="noopener noreferrer">
+                  <span>{t('Mở màn hình', 'Open display')}</span>
+                  <Icon name="external" />
+                </a>
 
-                  <button class="danger" type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>
-                    {t('Thu hồi', 'Revoke')}
-                  </button>
-                {:else}
-                  <button class="secondary" type="button" disabled={busy} aria-label={`${t('Kích hoạt lại', 'Reactivate')} ${device.name}`} onclick={() => reactivate(device)}>
-                    {t('Kích hoạt lại', 'Reactivate')}
-                  </button>
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
-
-    <div class="ui-sticky-pane">
-      <form onsubmit={create}>
-        <h3>{t('Đăng ký thiết bị', 'Register device')}</h3>
-        <label for="device-name">{t('Tên thiết bị', 'Device name')}</label>
-        <input id="device-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: iPad Cửa Phòng A', 'e.g. Lobby Tablet 01')} />
-        <button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button>
-      </form>
-    </div>
+                <button class="danger" type="button" disabled={busy} aria-label={`${t('Thu hồi', 'Revoke')} ${device.name}`} onclick={() => revoke(device)}>
+                  {t('Thu hồi', 'Revoke')}
+                </button>
+              {:else}
+                <button class="secondary" type="button" disabled={busy} aria-label={`${t('Kích hoạt lại', 'Reactivate')} ${device.name}`} onclick={() => reactivate(device)}>
+                  {t('Kích hoạt lại', 'Reactivate')}
+                </button>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </div>
+
+  <Modal
+    open={createModalOpen}
+    title={t('Đăng ký thiết bị', 'Register device')}
+    {busy}
+    closeLabel={t('Đóng', 'Close')}
+    onclose={closeCreateModal}
+  >
+    {#if createError}<Banner kind="error" text={t(...createError)} />{/if}
+    <form onsubmit={create}>
+      <label for="device-name">{t('Tên thiết bị', 'Device name')}</label>
+      <input id="device-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: iPad Cửa Phòng A', 'e.g. Lobby Tablet 01')} />
+      <div class="ui-form-actions">
+        <button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button>
+        <button class="secondary" type="button" disabled={busy} onclick={closeCreateModal}>{t('Hủy', 'Cancel')}</button>
+      </div>
+    </form>
+  </Modal>
 </section>
 
 <style>

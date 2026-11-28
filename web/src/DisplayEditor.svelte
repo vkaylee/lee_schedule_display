@@ -2,6 +2,8 @@
   import { onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  let confirmDialog = $state();
   import DisplayCanvas from './DisplayCanvas.svelte';
   import { blockKey, contrastRatio, displayBlocks, roomBlocks, defaultDisplayLayout, hasInvalidRoomAssignment, validDisplayLayout, widgetParts } from './display-layout.js';
   const widgetIcons = { clock:'clock', branding:'brand', room:'rooms', status:'check-circle', upcoming:'calendar', footer:'monitor', text:'edit', rectangle:'grid' };
@@ -78,10 +80,11 @@
     if (index < 0 || next < 0 || next >= blocks.length) return;
     [blocks[index], blocks[next]] = [blocks[next], blocks[index]]; config = { ...config, blocks };
   }
-  function removeSelectedLayer() {
+  async function removeSelectedLayer() {
     if (!block) return;
-    if (!window.confirm(t('Xóa lớp này?', 'Delete this layer?'))) return;
-    config = { ...config, blocks:config.blocks.filter(b => key(b) !== selected) };
+    const target = selected;
+    if (!await confirmDialog.ask(t('Xóa lớp này?', 'Delete this layer?'))) return;
+    config = { ...config, blocks:config.blocks.filter(b => key(b) !== target) };
     selected = config.blocks.length ? key(config.blocks[0]) : '';
     popoverOpen = false;
   }
@@ -117,12 +120,12 @@
   }
   function handleWindowPointerDown(event) {
     if (!popoverOpen || !popoverEl) return;
-    if (popoverEl.contains(event.target)) return;
+    if (event.target.closest?.('dialog[open]') || popoverEl.contains(event.target)) return;
     if (event.target.closest?.('.block-inspect-btn, .layer-inspect-btn')) return;
     popoverOpen = false;
   }
   function handleWindowKeyDown(event) {
-    if (event.key === 'Escape' && popoverOpen) {
+    if (event.key === 'Escape' && popoverOpen && !document.querySelector('dialog[open]')) {
       event.preventDefault();
       closePopover(true);
     }
@@ -147,12 +150,14 @@
       else setMessage('Đã lưu phiên bản trước; còn thay đổi chưa lưu.', 'Saved earlier revision; unsaved changes remain.', 'warning');
     } catch { setMessage('Không thể lưu. Kiểm tra thông tin và thử lại.', 'Could not save. Check the details and try again.'); } finally { busy = false; }
   }
-  function close() { if (!config || (!resolutionPending && JSON.stringify(config) === saved) || window.confirm(t('Bỏ các thay đổi chưa lưu?', 'Discard unsaved changes?'))) onclose(); }
+  async function close() { if (!config || (!resolutionPending && JSON.stringify(config) === saved) || await confirmDialog.ask(t('Bỏ các thay đổi chưa lưu?', 'Discard unsaved changes?'))) onclose(); }
   onMount(async () => {
     try { const r = await fetch(`/api/devices/${device.id}/display`, { cache:'no-store' }); if (!r.ok) throw new Error(); config = await r.json(); width = config.width || ''; height = config.height || ''; saved = JSON.stringify(config); }
     catch { setMessage('Không thể tải bố cục.', 'Could not load layout.'); }
   });
 </script>
+
+<ConfirmDialog bind:this={confirmDialog} {language} />
 
 <svelte:window onpointerdown={handleWindowPointerDown} onkeydown={handleWindowKeyDown} />
 
@@ -285,7 +290,7 @@
 
         <div class="inspector-actions">
           <button type="button" disabled={busy} onclick={save}>{busy ? t('Đang lưu…', 'Saving…') : t('Lưu thiết kế', 'Save layout')}</button>
-          <button class="secondary" type="button" onclick={() => { if (window.confirm(t('Thay bố cục hiện tại bằng mẫu mặc định? Các lựa chọn phòng sẽ bị xóa và cần chọn lại.', 'Replace current layout with default template? Room selections will be cleared and must be selected again.'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; popoverOpen = false; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
+          <button class="secondary" type="button" onclick={async () => { if (await confirmDialog.ask(t('Thay bố cục hiện tại bằng mẫu mặc định? Các lựa chọn phòng sẽ bị xóa và cần chọn lại.', 'Replace current layout with default template? Room selections will be cleared and must be selected again.'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; popoverOpen = false; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
           <a class="public-link" href={`/display/${device.public_id}`} target="_blank" rel="noreferrer">{t('Mở màn hình công khai', 'Open public display')} ↗</a>
         </div>
       </aside>

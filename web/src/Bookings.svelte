@@ -2,10 +2,14 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import Modal from './Modal.svelte';
+  let confirmDialog = $state();
   import { localTime, localTimeSeconds, instant } from './timezone.js';
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let rooms = $state([]), bookings = $state([]), series = $state([]), loading = $state(true), error = $state(''), notice = $state(''), busy = $state(false), zone = $state('');
+  let bookingModalOpen = $state(false), bookingError = $state(''), seriesModalOpen = $state(false), seriesError = $state('');
   let alerts = $state([]), scanStatus = $state(null);
   const seriesEnabled = true;
   let repeatFrequency = $state(1), repeatInterval = $state(1), repeatCount = $state(2), repeatUntil = $state(''), repeatEnd = $state('count');
@@ -29,16 +33,46 @@
     catch { error = ['Không thể xác nhận cảnh báo.', 'Could not acknowledge alert.']; }
     finally { busy = false; }
   }
-  function clear() { occurrenceTarget = null; seriesEdit = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false; starts = ''; ends = ''; }
+  function clear() {
+    occurrenceTarget = null; seriesEdit = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false; starts = ''; ends = '';
+    repeatFrequency = 1; repeatInterval = 1; repeatCount = 2; repeatUntil = ''; repeatEnd = 'count';
+    repeatWeekdays = []; repeatMonthMode = 'day'; repeatMonthDay = 1; repeatNth = 1; repeatNthWeekday = 1;
+    seriesDuration = 0; seriesStartText = ''; seriesEndText = '';
+  }
+  function openCreateBooking() {
+    clear();
+    bookingError = '';
+    notice = '';
+    bookingModalOpen = true;
+  }
+  function closeBookingModal() {
+    if (busy) return;
+    bookingModalOpen = false;
+    bookingError = '';
+    clear();
+  }
+  function openCreateSeries() {
+    clear();
+    seriesError = '';
+    notice = '';
+    seriesModalOpen = true;
+  }
+  function closeSeriesModal() {
+    if (busy) return;
+    seriesModalOpen = false;
+    seriesError = '';
+    clear();
+  }
   function edit(b) {
-    error = '';
+    bookingError = ''; notice = '';
     occurrenceTarget = null; seriesEdit = null; id = b.id; version = b.version; roomId = String(b.room_id); title = b.title; organizer = b.organizer; isPrivate = b.private;
     starts = localTimeSeconds(b.starts, zone);
     ends = localTimeSeconds(b.ends, zone);
     originalStart = b.starts; originalEnd = b.ends; originalStartText = starts; originalEndText = ends;
+    bookingModalOpen = true;
   }
   function editSeries(s, scope, occurrence = null) {
-    error = ''; notice = ''; occurrenceTarget = null; id = null;
+    seriesError = ''; notice = ''; occurrenceTarget = null; id = null;
     const rule = s.rule.rule;
     const durSec = Math.max(1, Math.round(rule.Duration / 1e9));
     const baseStart = scope === 'from' && occurrence ? occurrence.original_starts : Math.round(Date.parse(rule.Start) / 1000);
@@ -69,12 +103,13 @@
       repeatEnd = 'infinite'; repeatUntil = '';
     }
     seriesEdit = { id: s.id, version: s.version, scope, originalStarts: occurrence ? occurrence.original_starts : null };
+    seriesModalOpen = true;
   }
   async function cancelSeries(s, scope, originalStarts = null) {
     const prompt = scope === 'all'
       ? t('Hủy toàn bộ chuỗi này?', 'Cancel this entire series?')
       : t('Hủy chuỗi từ buổi này trở đi?', 'Cancel this and all following occurrences?');
-    if (!window.confirm(prompt)) return;
+    if (!await confirmDialog.ask(prompt)) return;
     busy = true; error = ''; notice = '';
     try {
       const body = scope === 'all' ? { scope: 'all' } : { scope: 'from', original_starts: originalStarts };
@@ -85,7 +120,7 @@
       });
       if (response.status === 409) { error = ['Chuỗi đã thay đổi hoặc đã bị hủy. Tải lại và thử lại.', 'Series changed or was already canceled. Reload and try again.']; return; }
       if (!response.ok) throw new Error();
-      if (seriesEdit?.id === s.id) clear();
+      if (seriesEdit?.id === s.id) { seriesModalOpen = false; seriesError = ''; clear(); }
       await load();
       notice = scope === 'all' ? ['Đã hủy toàn chuỗi.', 'Entire series canceled.'] : ['Đã hủy từ buổi đã chọn.', 'Series canceled from selected occurrence.'];
     } catch { error = ['Không thể hủy chuỗi; hãy tải lại.', 'Could not cancel series; reload and retry.']; }
@@ -96,7 +131,7 @@
     occurrenceTarget = { series: s.id, original: o.original_starts };
   }
   async function cancelOccurrence(s, o) {
-    if (!window.confirm(t('Hủy buổi này?', 'Cancel this occurrence?'))) return;
+    if (!await confirmDialog.ask(t('Hủy buổi này?', 'Cancel this occurrence?'))) return;
     busy = true; error = ''; notice = '';
     try {
       const response = await fetch(`/api/series/${s.id}/occurrences/${o.original_starts}/cancel`, {method:'POST', headers:{'X-CSRF-Token':csrf, 'If-Match':String(o.version)}});
@@ -106,29 +141,30 @@
     finally { busy = false; }
   }
   async function save(event) {
-    event.preventDefault(); error = ''; notice = ''; busy = true;
+    event.preventDefault(); bookingError = ''; notice = ''; busy = true;
     try {
-      if (!zone) { error = ['Chưa tải được múi giờ hệ thống. Vui lòng tải lại trang.', 'System time zone has not loaded. Please reload the page.']; return; }
+      if (!zone) { bookingError = ['Chưa tải được múi giờ hệ thống. Vui lòng tải lại trang.', 'System time zone has not loaded. Please reload the page.']; return; }
       const start = id && starts === originalStartText ? originalStart : instant(starts, zone);
       const end = id && ends === originalEndText ? originalEnd : instant(ends, zone);
-      if (start === null || end === null) { error = ['Giờ không tồn tại hoặc mơ hồ do chuyển giờ. Hãy chọn giờ khác.', 'Time is invalid or ambiguous due to a clock change. Choose another time.']; return; }
+      if (start === null || end === null) { bookingError = ['Giờ không tồn tại hoặc mơ hồ do chuyển giờ. Hãy chọn giờ khác.', 'Time is invalid or ambiguous due to a clock change. Choose another time.']; return; }
       const response = await fetch(occurrenceTarget ? `/api/series/${occurrenceTarget.series}/occurrences/${occurrenceTarget.original}` : id ? `/api/bookings/${id}` : '/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({room_id: Number(roomId), title: title.trim(), organizer: organizer.trim(), private: isPrivate, starts: start, ends: end, version: id ? version : 0}),
       });
-      if (response.status === 409) { error = ['Lịch đã thay đổi hoặc phòng có lịch trùng. Tải lại và thử lại.', 'Booking changed or overlaps another booking. Reload and try again.']; return; }
+      if (response.status === 409) { bookingError = ['Lịch đã thay đổi hoặc phòng có lịch trùng. Tải lại và thử lại.', 'Booking changed or overlaps another booking. Reload and try again.']; return; }
       if (!response.ok) throw new Error();
-      clear(); await load(); notice = ['Đã lưu lịch.', 'Booking saved.'];
-    } catch { error = ['Không thể lưu lịch. Kiểm tra thông tin và thử lại.', 'Could not save booking. Check the details and try again.']; }
+      bookingModalOpen = false; clear(); await load(); notice = ['Đã lưu lịch.', 'Booking saved.'];
+    } catch { bookingError = ['Không thể lưu lịch. Kiểm tra thông tin và thử lại.', 'Could not save booking. Check the details and try again.']; }
     finally { busy = false; }
   }
   async function saveSeries(event) {
-    event.preventDefault(); error = ''; notice = ''; busy = true;
+    event.preventDefault(); seriesError = ''; notice = ''; busy = true;
     const editingSeries = seriesEdit;
     try {
+      if (!zone) { seriesError = ['Chưa tải được múi giờ hệ thống. Vui lòng tải lại trang.', 'System time zone has not loaded. Please reload the page.']; return; }
       const start = instant(starts, zone);
       const end = editingSeries && starts === seriesStartText && ends === seriesEndText && start !== null ? start + seriesDuration : instant(ends, zone);
-      if (start === null || end === null || end <= start) { error = ['Giờ không hợp lệ hoặc mơ hồ.', 'Invalid or ambiguous time.']; return; }
+      if (start === null || end === null || end <= start) { seriesError = ['Giờ không hợp lệ hoặc mơ hồ.', 'Invalid or ambiguous time.']; return; }
       const frequency = Number(repeatFrequency);
       const rule = {frequency, interval:Number(repeatInterval), count:repeatEnd === 'count' ? Number(repeatCount) : 0, until:repeatEnd === 'until' ? repeatUntil : ''};
       if (frequency === 2) rule.weekdays = repeatWeekdays.map(Number);
@@ -145,19 +181,19 @@
       const response = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(payload) });
       if (response.status === 409) {
         const message = await response.text();
-        error = message.includes('exception_conflict')
+        seriesError = message.includes('exception_conflict')
           ? ['Không thể sửa hoặc tách chuỗi vì một ngoại lệ sẽ mất giờ gốc. Hãy sửa hoặc hủy ngoại lệ đó trước.', 'Cannot modify or split series because an exception would lose its original start. Resolve that exception first.']
           : ['Chuỗi đã thay đổi hoặc có lịch trùng.', 'Series changed or booking conflict.'];
         return;
       }
-      if (!response.ok) { error = ['Quy tắc hoặc giờ không hợp lệ, hoặc giờ bị mơ hồ do DST.', 'Invalid rule or time, or ambiguous DST time.']; return; }
-      clear(); await load();
+      if (!response.ok) { seriesError = ['Quy tắc hoặc giờ không hợp lệ, hoặc giờ bị mơ hồ do DST.', 'Invalid rule or time, or ambiguous DST time.']; return; }
+      seriesModalOpen = false; clear(); await load();
       notice = editingSeries ? ['Đã cập nhật chuỗi.', 'Series updated.'] : ['Đã tạo chuỗi.', 'Series created.'];
-    } catch { error = editingSeries ? ['Không thể cập nhật chuỗi.', 'Could not update series.'] : ['Không thể tạo chuỗi.', 'Could not create series.']; }
+    } catch { seriesError = editingSeries ? ['Không thể cập nhật chuỗi.', 'Could not update series.'] : ['Không thể tạo chuỗi.', 'Could not create series.']; }
     finally { busy = false; }
   }
   async function cancel(b) {
-    if (!window.confirm(t('Hủy lịch này?', 'Cancel this booking?'))) return;
+    if (!await confirmDialog.ask(t('Hủy lịch này?', 'Cancel this booking?'))) return;
     busy = true; error = ''; notice = '';
     try {
       const response = await fetch(`/api/bookings/${b.id}/cancel`, { method:'POST', headers:{'X-CSRF-Token':csrf, 'If-Match': String(b.version)} });
@@ -174,16 +210,62 @@
   });
 </script>
 
+<ConfirmDialog bind:this={confirmDialog} {language} />
+
+{#snippet bookingCoreFields(prefix)}
+  <label for={`${prefix}-room`}>{t('Phòng', 'Room')}</label>
+  <select id={`${prefix}-room`} bind:value={roomId} required>
+    <option value="">{t('Chọn phòng', 'Select room')}</option>
+    {#each rooms.filter(r => r.active) as room}
+      <option value={String(room.id)}>{room.name}</option>
+    {/each}
+  </select>
+
+  <label for={`${prefix}-title`}>{t('Tiêu đề', 'Title')}</label>
+  <input id={`${prefix}-title`} bind:value={title} maxlength="256" required placeholder={t('Ví dụ: Họp giao ban tuần', 'e.g. Weekly sync')} />
+
+  <label for={`${prefix}-organizer`}>{t('Người tổ chức', 'Organizer')}</label>
+  <input id={`${prefix}-organizer`} bind:value={organizer} maxlength="128" required placeholder={t('Ví dụ: Nguyễn Văn A', 'e.g. Alex Rivera')} />
+
+  <label class="checkbox-card">
+    <input type="checkbox" bind:checked={isPrivate} />
+    <span>{t('Riêng tư', 'Private')}</span>
+  </label>
+
+  <div class="form-grid-2">
+    <div>
+      <label for={`${prefix}-start`}>{t('Bắt đầu', 'Start')}</label>
+      <input id={`${prefix}-start`} type="datetime-local" step="1" bind:value={starts} required />
+    </div>
+    <div>
+      <label for={`${prefix}-end`}>{t('Kết thúc', 'End')}</label>
+      <input id={`${prefix}-end`} type="datetime-local" step="1" bind:value={ends} required />
+    </div>
+  </div>
+{/snippet}
+
 <section aria-labelledby="bookings-heading">
   <div class="section-head">
     <div>
       <p class="section-kicker">{t('ĐIỀU PHỐI LỊCH HỌP', 'SCHEDULING & CONFLICTS')}</p>
       <h2 id="bookings-heading">{t('Lịch phòng', 'Room bookings')}</h2>
     </div>
-    <span class="ui-pill ui-pill--neutral tz-pill">
-      <Icon name="clock" />
-      <span>{t('Múi giờ hệ thống:', 'System time zone:')} {zone || t('đang tải', 'loading')}</span>
-    </span>
+    <div class="section-actions">
+      <span class="ui-pill ui-pill--neutral tz-pill">
+        <Icon name="clock" />
+        <span>{t('Múi giờ hệ thống:', 'System time zone:')} {zone || t('đang tải', 'loading')}</span>
+      </span>
+      <button type="button" disabled={busy} onclick={openCreateBooking}>
+        <Icon name="plus" />
+        <span>{t('Tạo lịch', 'Create booking')}</span>
+      </button>
+      {#if seriesEnabled}
+        <button class="secondary" type="button" disabled={busy} onclick={openCreateSeries}>
+          <Icon name="plus" />
+          <span>{t('Tạo chuỗi', 'Create series')}</span>
+        </button>
+      {/if}
+    </div>
   </div>
 
   {#if error}<Banner kind="error" text={t(...error)} />{/if}
@@ -259,275 +341,255 @@
     </div>
   {/if}
 
-  <div class="ui-split">
-    <div class="bookings-main">
+  <div class="ui-view-body bookings-main">
+    <div>
+      <div class="block-header">
+        <h3>{t('Danh sách lịch phòng', 'Bookings list')}</h3>
+        <span class="ui-pill ui-pill--neutral">{bookings.length}</span>
+      </div>
+      {#if loading}
+        <p class="ui-loading" role="status">
+          <span class="ui-spinner" aria-hidden="true"></span>
+          <span>{t('Đang tải lịch phòng…', 'Loading bookings…')}</span>
+        </p>
+      {:else if bookings.length === 0}
+        <div class="ui-empty">
+          <strong>{t('Chưa có lịch.', 'No bookings yet.')}</strong>
+          <p>{t('Bấm "Tạo lịch" để tạo cuộc họp mới.', 'Click "Create booking" to add a new meeting.')}</p>
+        </div>
+      {:else}
+        <ul class="ui-card-list">
+          {#each bookings as b (b.id)}
+            <li class="ui-card booking-card" class:is-canceled={b.canceled} class:is-editing={bookingModalOpen && id === b.id && !occurrenceTarget}>
+              <div class="card-body">
+                <div class="card-badges">
+                  <span class="room-badge">{rooms.find(r => r.id === b.room_id)?.name ?? t('Phòng không tồn tại', 'Room not found')}</span>
+                  {#if b.private}<span class="ui-pill ui-pill--neutral">{t('Riêng tư', 'Private')}</span>{/if}
+                  {#if b.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
+                </div>
+                <strong class="card-title">{b.title}</strong>
+                <div class="time-range">
+                  <Icon name="clock" />
+                  <span class="mono">{zone ? localTime(b.starts, zone) : ''}</span>
+                  <span class="to-label">{t('đến', 'to')}</span>
+                  <span class="mono">{zone ? localTime(b.ends, zone) : ''}</span>
+                </div>
+                <div class="utc-caption mono">
+                  UTC: {new Date(b.starts * 1000).toISOString()} – {new Date(b.ends * 1000).toISOString()}
+                </div>
+              </div>
+              {#if !b.canceled}
+                <div class="card-actions">
+                  <button class="secondary" type="button" disabled={busy} aria-label={`${t('Sửa lịch', 'Edit booking')} ${b.title}`} onclick={() => edit(b)}>{t('Sửa', 'Edit')}</button>
+                  <button class="danger" type="button" disabled={busy} aria-label={`${t('Hủy lịch', 'Cancel booking')} ${b.title}`} onclick={() => cancel(b)}>{t('Hủy lịch', 'Cancel booking')}</button>
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
+    {#if seriesEnabled}
       <div>
         <div class="block-header">
-          <h3>{t('Danh sách lịch phòng', 'Bookings list')}</h3>
-          <span class="ui-pill ui-pill--neutral">{bookings.length}</span>
+          <h3>{t('Chuỗi lịch', 'Recurring series')}</h3>
+          <span class="ui-pill ui-pill--neutral">{series.length}</span>
         </div>
+        <p class="policy-note">
+          {t('Lịch đơn được kiểm tra toàn bộ; xung đột giữa các chuỗi chỉ được kiểm tra trong 12 tháng. Xung đột ngoài cửa sổ có thể được lưu và chưa được cảnh báo cho đến khi vào cửa sổ quét. Cảnh báo không được bảo đảm nếu worker lỗi hoặc quá hạn; hãy kiểm tra thủ công lịch xa. Có thể sửa hoặc hủy từng buổi, từ buổi này trở đi hoặc toàn chuỗi; thay đổi làm mất giờ gốc của ngoại lệ sẽ bị từ chối.', 'Single bookings are checked throughout; conflicts between series are checked only within 12 months. Conflicts outside this window can be saved and are not alerted until they enter the scan window. Alerts are not guaranteed if the worker fails or is overdue; manually check distant schedules. Individual occurrences, this-and-following, or entire series can be edited or canceled; changes that would drop an exception’s original start are rejected.')}
+        </p>
         {#if loading}
           <p class="ui-loading" role="status">
             <span class="ui-spinner" aria-hidden="true"></span>
-            <span>{t('Đang tải lịch phòng…', 'Loading bookings…')}</span>
+            <span>{t('Đang tải chuỗi lịch…', 'Loading series…')}</span>
           </p>
-        {:else if bookings.length === 0}
+        {:else if series.length === 0}
           <div class="ui-empty">
-            <strong>{t('Chưa có lịch.', 'No bookings yet.')}</strong>
-            <p>{t('Tạo cuộc họp mới bằng biểu mẫu bên cạnh.', 'Create a new meeting using the composer form.')}</p>
+            <p>{t('Chưa có chuỗi lịch lặp nào.', 'No recurring series yet.')}</p>
           </div>
         {:else}
           <ul class="ui-card-list">
-            {#each bookings as b (b.id)}
-              <li class="ui-card booking-card" class:is-canceled={b.canceled} class:is-editing={id === b.id && !occurrenceTarget}>
-                <div class="card-body">
-                  <div class="card-badges">
-                    <span class="room-badge">{rooms.find(r => r.id === b.room_id)?.name ?? t('Phòng không tồn tại', 'Room not found')}</span>
-                    {#if b.private}<span class="ui-pill ui-pill--neutral">{t('Riêng tư', 'Private')}</span>{/if}
-                    {#if b.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
-                  </div>
-                  <strong class="card-title">{b.title}</strong>
-                  <div class="time-range">
-                    <Icon name="clock" />
-                    <span class="mono">{zone ? localTime(b.starts, zone) : ''}</span>
-                    <span class="to-label">{t('đến', 'to')}</span>
-                    <span class="mono">{zone ? localTime(b.ends, zone) : ''}</span>
-                  </div>
-                  <div class="utc-caption mono">
-                    UTC: {new Date(b.starts * 1000).toISOString()} – {new Date(b.ends * 1000).toISOString()}
-                  </div>
+            {#each series as s (s.id)}
+              <li class="ui-card" class:is-canceled={s.canceled} class:is-editing={seriesModalOpen && seriesEdit?.id === s.id}>
+                <div class="card-badges">
+                  <span class="room-badge">{rooms.find(r => r.id === s.room_id)?.name ?? s.room_id}</span>
+                  {#if s.private}<span class="ui-pill ui-pill--neutral">{t('(Riêng tư)', '(Private)')}</span>{/if}
+                  {#if s.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
+                  <span class="ui-pill ui-pill--success">
+                    {t('Lặp mỗi', 'Repeat every')} {s.rule.rule.Interval} {s.rule.rule.Frequency === 1 ? t('ngày', 'days') : s.rule.rule.Frequency === 2 ? t('tuần', 'weeks') : t('tháng', 'months')}
+                  </span>
                 </div>
-                {#if !b.canceled}
+                <strong class="card-title">{s.title}</strong>
+                <p class="series-organizer">{t('Người tổ chức', 'Organizer')}: {s.organizer}</p>
+                {#if !s.canceled}
                   <div class="card-actions">
-                    <button class="secondary" type="button" disabled={busy} aria-label={`${t('Sửa lịch', 'Edit booking')} ${b.title}`} onclick={() => edit(b)}>{t('Sửa', 'Edit')}</button>
-                    <button class="danger" type="button" disabled={busy} aria-label={`${t('Hủy lịch', 'Cancel booking')} ${b.title}`} onclick={() => cancel(b)}>{t('Hủy lịch', 'Cancel booking')}</button>
+                    <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'all')}>{t('Sửa chuỗi', 'Edit series')}</button>
+                    <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'all')}>{t('Hủy chuỗi', 'Cancel series')}</button>
                   </div>
                 {/if}
+
+                <div class="series-meta-grid">
+                  <div><span>{t('Múi giờ chuỗi', 'Series time zone')}</span><strong class="mono">{s.rule.location}</strong></div>
+                  <div><span>{t('Bắt đầu', 'Start')}</span><strong class="mono">{localTimeSeconds(Date.parse(s.rule.rule.Start) / 1000, s.rule.location)}</strong></div>
+                  <div>
+                    <span>{t('Quy tắc', 'Pattern')}</span>
+                    <strong>
+                      {#if s.rule.rule.Frequency === 2}{t('thứ', 'weekdays')}: {(s.rule.rule.Weekdays ?? []).join(', ')}{/if}
+                      {#if s.rule.rule.Frequency === 3}{s.rule.rule.MonthDay ? `${t('ngày', 'day')} ${s.rule.rule.MonthDay}` : `${t('thứ tự', 'position')} ${s.rule.rule.Nth}, ${t('thứ', 'weekday')} ${s.rule.rule.NthWeekday}`}{/if}
+                      {#if s.rule.rule.Frequency === 1}{t('Hàng ngày', 'Daily')}{/if}
+                      ·
+                      {#if s.rule.rule.Count}{s.rule.rule.Count} {t('buổi', 'occurrences')}{:else if s.rule.rule.Until.startsWith('0001-01-01')}{t('không có ngày kết thúc', 'no end date')}{:else}{t('đến hết ngày', 'through date')} {s.rule.rule.Until.slice(0, 10)}{/if}
+                    </strong>
+                  </div>
+                  <div><span>{t('Mốc bảo vệ khi tạo chuỗi (không biểu thị cửa sổ quét hiện tại)', 'Creation-time conflict protection horizon (not the current scan window)')}</span><strong class="mono">{localTimeSeconds(s.checked_through, s.rule.location)} ({s.rule.location})</strong></div>
+                </div>
+
+                <details class="occurrences-details">
+                  <summary>{t('Xem các buổi', 'View occurrences')} ({s.occurrences.length})</summary>
+                  <ul class="occurrences-list">
+                    {#each s.occurrences as occurrence (occurrence.original_starts)}
+                      <li class="occurrence-row" class:is-canceled={occurrence.canceled}>
+                        <div class="occ-info">
+                          <span class="mono">{localTimeSeconds(occurrence.starts, zone)} — {localTimeSeconds(occurrence.ends, zone)}</span>
+                          <span>{occurrence.title} · {rooms.find(r => r.id === occurrence.room_id)?.name ?? occurrence.room_id}</span>
+                          {#if occurrence.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
+                        </div>
+                        {#if !s.canceled && !occurrence.canceled}
+                          <div class="card-actions">
+                            <button class="secondary" type="button" disabled={busy} onclick={() => editOccurrence(s, occurrence)}>{t('Sửa buổi', 'Edit occurrence')}</button>
+                            <button class="danger" type="button" disabled={busy} onclick={() => cancelOccurrence(s, occurrence)}>{t('Hủy buổi', 'Cancel occurrence')}</button>
+                            <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'from', occurrence)}>{t('Sửa từ buổi này', 'Edit from here')}</button>
+                            <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'from', occurrence.original_starts)}>{t('Hủy từ buổi này', 'Cancel from here')}</button>
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
               </li>
             {/each}
           </ul>
         {/if}
       </div>
+    {/if}
+  </div>
 
-      {#if seriesEnabled}
-        <div>
-          <div class="block-header">
-            <h3>{t('Chuỗi lịch', 'Recurring series')}</h3>
-            <span class="ui-pill ui-pill--neutral">{series.length}</span>
-          </div>
-          <p class="policy-note">
-            {t('Lịch đơn được kiểm tra toàn bộ; xung đột giữa các chuỗi chỉ được kiểm tra trong 12 tháng. Xung đột ngoài cửa sổ có thể được lưu và chưa được cảnh báo cho đến khi vào cửa sổ quét. Cảnh báo không được bảo đảm nếu worker lỗi hoặc quá hạn; hãy kiểm tra thủ công lịch xa. Có thể sửa hoặc hủy từng buổi, từ buổi này trở đi hoặc toàn chuỗi; thay đổi làm mất giờ gốc của ngoại lệ sẽ bị từ chối.', 'Single bookings are checked throughout; conflicts between series are checked only within 12 months. Conflicts outside this window can be saved and are not alerted until they enter the scan window. Alerts are not guaranteed if the worker fails or is overdue; manually check distant schedules. Individual occurrences, this-and-following, or entire series can be edited or canceled; changes that would drop an exception’s original start are rejected.')}
-          </p>
-          {#if loading}
-            <p class="ui-loading" role="status">
-              <span class="ui-spinner" aria-hidden="true"></span>
-              <span>{t('Đang tải chuỗi lịch…', 'Loading series…')}</span>
-            </p>
-          {:else if series.length === 0}
-            <div class="ui-empty">
-              <p>{t('Chưa có chuỗi lịch lặp nào.', 'No recurring series yet.')}</p>
-            </div>
-          {:else}
-            <ul class="ui-card-list">
-              {#each series as s (s.id)}
-                <li class="ui-card" class:is-canceled={s.canceled} class:is-editing={seriesEdit?.id === s.id}>
-                  <div class="card-badges">
-                    <span class="room-badge">{rooms.find(r => r.id === s.room_id)?.name ?? s.room_id}</span>
-                    {#if s.private}<span class="ui-pill ui-pill--neutral">{t('(Riêng tư)', '(Private)')}</span>{/if}
-                    {#if s.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
-                    <span class="ui-pill ui-pill--success">
-                      {t('Lặp mỗi', 'Repeat every')} {s.rule.rule.Interval} {s.rule.rule.Frequency === 1 ? t('ngày', 'days') : s.rule.rule.Frequency === 2 ? t('tuần', 'weeks') : t('tháng', 'months')}
-                    </span>
-                  </div>
-                  <strong class="card-title">{s.title}</strong>
-                  <p class="series-organizer">{t('Người tổ chức', 'Organizer')}: {s.organizer}</p>
-                  {#if !s.canceled}
-                    <div class="card-actions">
-                      <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'all')}>{t('Sửa chuỗi', 'Edit series')}</button>
-                      <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'all')}>{t('Hủy chuỗi', 'Cancel series')}</button>
-                    </div>
-                  {/if}
+  <Modal
+    open={bookingModalOpen}
+    title={id ? t('Sửa lịch', 'Edit booking') : t('Tạo lịch', 'Create booking')}
+    badge={occurrenceTarget ? t('Chỉnh 1 buổi', 'Single occurrence') : ''}
+    {busy}
+    closeLabel={t('Đóng', 'Close')}
+    onclose={closeBookingModal}
+  >
+    {#if bookingError}<Banner kind="error" text={t(...bookingError)} />{/if}
+    <form onsubmit={save}>
+      {@render bookingCoreFields('booking')}
+      <div class="ui-form-actions">
+        <button type="submit" disabled={busy}>{t('Lưu lịch', 'Save booking')}</button>
+        <button class="secondary" type="button" onclick={closeBookingModal} disabled={busy}>{t('Hủy', 'Cancel')}</button>
+      </div>
+    </form>
+  </Modal>
 
-                  <div class="series-meta-grid">
-                    <div><span>{t('Múi giờ chuỗi', 'Series time zone')}</span><strong class="mono">{s.rule.location}</strong></div>
-                    <div><span>{t('Bắt đầu', 'Start')}</span><strong class="mono">{localTimeSeconds(Date.parse(s.rule.rule.Start) / 1000, s.rule.location)}</strong></div>
-                    <div>
-                      <span>{t('Quy tắc', 'Pattern')}</span>
-                      <strong>
-                        {#if s.rule.rule.Frequency === 2}{t('thứ', 'weekdays')}: {(s.rule.rule.Weekdays ?? []).join(', ')}{/if}
-                        {#if s.rule.rule.Frequency === 3}{s.rule.rule.MonthDay ? `${t('ngày', 'day')} ${s.rule.rule.MonthDay}` : `${t('thứ tự', 'position')} ${s.rule.rule.Nth}, ${t('thứ', 'weekday')} ${s.rule.rule.NthWeekday}`}{/if}
-                        {#if s.rule.rule.Frequency === 1}{t('Hàng ngày', 'Daily')}{/if}
-                        ·
-                        {#if s.rule.rule.Count}{s.rule.rule.Count} {t('buổi', 'occurrences')}{:else if s.rule.rule.Until.startsWith('0001-01-01')}{t('không có ngày kết thúc', 'no end date')}{:else}{t('đến hết ngày', 'through date')} {s.rule.rule.Until.slice(0, 10)}{/if}
-                      </strong>
-                    </div>
-                    <div><span>{t('Mốc bảo vệ khi tạo chuỗi (không biểu thị cửa sổ quét hiện tại)', 'Creation-time conflict protection horizon (not the current scan window)')}</span><strong class="mono">{localTimeSeconds(s.checked_through, s.rule.location)} ({s.rule.location})</strong></div>
-                  </div>
-
-                  <details class="occurrences-details">
-                    <summary>{t('Xem các buổi', 'View occurrences')} ({s.occurrences.length})</summary>
-                    <ul class="occurrences-list">
-                      {#each s.occurrences as occurrence (occurrence.original_starts)}
-                        <li class="occurrence-row" class:is-canceled={occurrence.canceled}>
-                          <div class="occ-info">
-                            <span class="mono">{localTimeSeconds(occurrence.starts, zone)} — {localTimeSeconds(occurrence.ends, zone)}</span>
-                            <span>{occurrence.title} · {rooms.find(r => r.id === occurrence.room_id)?.name ?? occurrence.room_id}</span>
-                            {#if occurrence.canceled}<span class="ui-pill ui-pill--danger">{t('(Đã hủy)', '(Canceled)')}</span>{/if}
-                          </div>
-                          {#if !s.canceled && !occurrence.canceled}
-                            <div class="card-actions">
-                              <button class="secondary" type="button" disabled={busy} onclick={() => editOccurrence(s, occurrence)}>{t('Sửa buổi', 'Edit occurrence')}</button>
-                              <button class="danger" type="button" disabled={busy} onclick={() => cancelOccurrence(s, occurrence)}>{t('Hủy buổi', 'Cancel occurrence')}</button>
-                              <button class="secondary" type="button" disabled={busy} onclick={() => editSeries(s, 'from', occurrence)}>{t('Sửa từ buổi này', 'Edit from here')}</button>
-                              <button class="danger" type="button" disabled={busy} onclick={() => cancelSeries(s, 'from', occurrence.original_starts)}>{t('Hủy từ buổi này', 'Cancel from here')}</button>
-                            </div>
-                          {/if}
-                        </li>
-                      {/each}
-                    </ul>
-                  </details>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-      {/if}
-    </div>
-
-    <aside class="ui-sticky-pane">
-      <form class:ui-form-editing={id !== null} onsubmit={save}>
-        <div class="form-head">
-          <h3>{id ? t('Sửa lịch', 'Edit booking') : t('Tạo lịch', 'Create booking')}</h3>
-          {#if occurrenceTarget}<span class="ui-pill ui-pill--warning">{t('Chỉnh 1 buổi', 'Single occurrence')}</span>{/if}
-        </div>
-        <label for="booking-room">{t('Phòng', 'Room')}</label>
-        <select id="booking-room" bind:value={roomId} required>
-          <option value="">{t('Chọn phòng', 'Select room')}</option>
-          {#each rooms.filter(r => r.active) as room}
-            <option value={String(room.id)}>{room.name}</option>
-          {/each}
-        </select>
-
-        <label for="booking-title">{t('Tiêu đề', 'Title')}</label>
-        <input id="booking-title" bind:value={title} maxlength="256" required placeholder={t('Ví dụ: Họp giao ban tuần', 'e.g. Weekly sync')} />
-
-        <label for="booking-organizer">{t('Người tổ chức', 'Organizer')}</label>
-        <input id="booking-organizer" bind:value={organizer} maxlength="128" required placeholder={t('Ví dụ: Nguyễn Văn A', 'e.g. Alex Rivera')} />
-
-        <label class="checkbox-card">
-          <input type="checkbox" bind:checked={isPrivate} />
-          <span>{t('Riêng tư', 'Private')}</span>
-        </label>
+  {#if seriesEnabled}
+    <Modal
+      open={seriesModalOpen}
+      title={seriesEdit ? (seriesEdit.scope === 'all' ? t('Sửa toàn chuỗi', 'Edit entire series') : t('Sửa từ buổi đã chọn', 'Edit from selected occurrence')) : t('Tạo chuỗi', 'Create series')}
+      badge={seriesEdit ? (seriesEdit.scope === 'all' ? t('Toàn chuỗi', 'Entire series') : t('Từ buổi này', 'From occurrence')) : ''}
+      size="lg"
+      {busy}
+      closeLabel={t('Đóng', 'Close')}
+      onclose={closeSeriesModal}
+    >
+      {#if seriesError}<Banner kind="error" text={t(...seriesError)} />{/if}
+      <form onsubmit={saveSeries}>
+        {@render bookingCoreFields('series')}
 
         <div class="form-grid-2">
           <div>
-            <label for="booking-start">{t('Bắt đầu', 'Start')}</label>
-            <input id="booking-start" type="datetime-local" step="1" bind:value={starts} required />
+            <label for="repeat-frequency">{t('Tần suất', 'Frequency')}</label>
+            <select id="repeat-frequency" bind:value={repeatFrequency}>
+              <option value={1}>{t('Ngày', 'Daily')}</option>
+              <option value={2}>{t('Tuần', 'Weekly')}</option>
+              <option value={3}>{t('Tháng', 'Monthly')}</option>
+            </select>
           </div>
           <div>
-            <label for="booking-end">{t('Kết thúc', 'End')}</label>
-            <input id="booking-end" type="datetime-local" step="1" bind:value={ends} required />
+            <label for="repeat-interval">{t('Khoảng lặp', 'Interval')}</label>
+            <input id="repeat-interval" type="number" min="1" max="366" bind:value={repeatInterval} required />
           </div>
         </div>
+
+        {#if Number(repeatFrequency) === 2}
+          <fieldset class="weekdays-fieldset">
+            <legend>{t('Thứ trong tuần', 'Weekdays')}</legend>
+            <div class="weekdays-grid">
+              {#each [t('Chủ nhật','Sunday'),t('Thứ hai','Monday'),t('Thứ ba','Tuesday'),t('Thứ tư','Wednesday'),t('Thứ năm','Thursday'),t('Thứ sáu','Friday'),t('Thứ bảy','Saturday')] as day, i}
+                <label class="weekday-chip">
+                  <input type="checkbox" value={i} bind:group={repeatWeekdays} />
+                  <span>{day}</span>
+                </label>
+              {/each}
+            </div>
+          </fieldset>
+        {/if}
+
+        {#if Number(repeatFrequency) === 3}
+          <label for="repeat-month-mode">{t('Quy tắc tháng', 'Monthly rule')}</label>
+          <select id="repeat-month-mode" bind:value={repeatMonthMode}>
+            <option value="day">{t('Ngày trong tháng', 'Day of month')}</option>
+            <option value="nth">{t('Thứ tự thứ trong tháng', 'Nth weekday')}</option>
+          </select>
+          {#if repeatMonthMode === 'day'}
+            <label for="repeat-month-day">{t('Ngày trong tháng', 'Day of month')}</label>
+            <input id="repeat-month-day" type="number" min="1" max="31" bind:value={repeatMonthDay} required />
+            <p class="field-hint">{t('Tháng không có ngày này sẽ được bỏ qua.', 'Months without this day are skipped.')}</p>
+          {:else}
+            <div class="form-grid-2">
+              <div>
+                <label for="repeat-nth">{t('Thứ tự', 'Position')}</label>
+                <select id="repeat-nth" bind:value={repeatNth}>
+                  <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option><option value={5}>5</option><option value={-1}>{t('Cuối', 'Last')}</option>
+                </select>
+              </div>
+              <div>
+                <label for="repeat-weekday">{t('Thứ', 'Weekday')}</label>
+                <select id="repeat-weekday" bind:value={repeatNthWeekday}>
+                  {#each [t('Chủ nhật','Sunday'),t('Thứ hai','Monday'),t('Thứ ba','Tuesday'),t('Thứ tư','Wednesday'),t('Thứ năm','Thursday'),t('Thứ sáu','Friday'),t('Thứ bảy','Saturday')] as day, i}
+                    <option value={i}>{day}</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
+          {/if}
+        {/if}
+
+        <label for="repeat-end">{t('Kết thúc theo', 'End by')}</label>
+        <select id="repeat-end" bind:value={repeatEnd}>
+          <option value="count">{t('Số buổi', 'Occurrence count')}</option>
+          <option value="until">{t('Ngày', 'Date')}</option>
+          <option value="infinite">{t('Không có ngày kết thúc', 'No end date')}</option>
+        </select>
+
+        {#if repeatEnd === 'count'}
+          <label for="repeat-count">{t('Số buổi', 'Number of occurrences')}</label>
+          <input id="repeat-count" type="number" min="1" max="10000" bind:value={repeatCount} required />
+        {:else if repeatEnd === 'until'}
+          <label for="repeat-until">{t('Ngày cuối (bao gồm)', 'Last date (inclusive)')}</label>
+          <input id="repeat-until" type="date" bind:value={repeatUntil} required />
+        {:else}
+          <Banner kind="warning" text={t('Chuỗi không có ngày kết thúc chỉ được quét từng cửa sổ 12 tháng và chỉ hỗ trợ đến năm 2400. Giờ không tồn tại hoặc mơ hồ do DST có thể làm worker ngừng quét; khi worker lỗi hoặc quá hạn, cảnh báo có thể thiếu và màn hình có thể chuyển Không xác định.', 'A series without an end date is scanned in 12-month windows and supported only through year 2400. A nonexistent or ambiguous DST time can stop the worker scan; when the worker fails or is overdue, alerts may be incomplete and displays may become Unknown.')} />
+        {/if}
 
         <div class="ui-form-actions">
-          <button type="submit" disabled={busy}>{t('Lưu lịch', 'Save booking')}</button>
-          {#if id}<button class="secondary" type="button" onclick={clear} disabled={busy}>{t('Hủy sửa', 'Cancel editing')}</button>{/if}
+          <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends}>{seriesEdit ? t('Lưu thay đổi chuỗi', 'Save series changes') : t('Tạo chuỗi', 'Create series')}</button>
+          <button class="secondary" type="button" onclick={closeSeriesModal} disabled={busy}>{t('Hủy', 'Cancel')}</button>
         </div>
       </form>
-
-      {#if seriesEnabled}
-        <form class:ui-form-editing={seriesEdit !== null} onsubmit={saveSeries}>
-          <div class="form-head">
-            <h3>{seriesEdit ? (seriesEdit.scope === 'all' ? t('Sửa toàn chuỗi', 'Edit entire series') : t('Sửa từ buổi đã chọn', 'Edit from selected occurrence')) : t('Tạo chuỗi', 'Create series')}</h3>
-            {#if seriesEdit}<span class="ui-pill ui-pill--warning">{seriesEdit.scope === 'all' ? t('Toàn chuỗi', 'Entire series') : t('Từ buổi này', 'From occurrence')}</span>{/if}
-          </div>
-          <p class="series-inherit-note">{t('Dùng phòng, tiêu đề, người tổ chức, thời gian và riêng tư từ biểu mẫu lịch ở trên.', 'Uses room, title, organizer, time and privacy from the booking form above.')}</p>
-
-          <div class="form-grid-2">
-            <div>
-              <label for="repeat-frequency">{t('Tần suất', 'Frequency')}</label>
-              <select id="repeat-frequency" bind:value={repeatFrequency}>
-                <option value={1}>{t('Ngày', 'Daily')}</option>
-                <option value={2}>{t('Tuần', 'Weekly')}</option>
-                <option value={3}>{t('Tháng', 'Monthly')}</option>
-              </select>
-            </div>
-            <div>
-              <label for="repeat-interval">{t('Khoảng lặp', 'Interval')}</label>
-              <input id="repeat-interval" type="number" min="1" max="366" bind:value={repeatInterval} required />
-            </div>
-          </div>
-
-          {#if Number(repeatFrequency) === 2}
-            <fieldset class="weekdays-fieldset">
-              <legend>{t('Thứ trong tuần', 'Weekdays')}</legend>
-              <div class="weekdays-grid">
-                {#each [t('Chủ nhật','Sunday'),t('Thứ hai','Monday'),t('Thứ ba','Tuesday'),t('Thứ tư','Wednesday'),t('Thứ năm','Thursday'),t('Thứ sáu','Friday'),t('Thứ bảy','Saturday')] as day, i}
-                  <label class="weekday-chip">
-                    <input type="checkbox" value={i} bind:group={repeatWeekdays} />
-                    <span>{day}</span>
-                  </label>
-                {/each}
-              </div>
-            </fieldset>
-          {/if}
-
-          {#if Number(repeatFrequency) === 3}
-            <label for="repeat-month-mode">{t('Quy tắc tháng', 'Monthly rule')}</label>
-            <select id="repeat-month-mode" bind:value={repeatMonthMode}>
-              <option value="day">{t('Ngày trong tháng', 'Day of month')}</option>
-              <option value="nth">{t('Thứ tự thứ trong tháng', 'Nth weekday')}</option>
-            </select>
-            {#if repeatMonthMode === 'day'}
-              <label for="repeat-month-day">{t('Ngày trong tháng', 'Day of month')}</label>
-              <input id="repeat-month-day" type="number" min="1" max="31" bind:value={repeatMonthDay} required />
-              <p class="field-hint">{t('Tháng không có ngày này sẽ được bỏ qua.', 'Months without this day are skipped.')}</p>
-            {:else}
-              <div class="form-grid-2">
-                <div>
-                  <label for="repeat-nth">{t('Thứ tự', 'Position')}</label>
-                  <select id="repeat-nth" bind:value={repeatNth}>
-                    <option value={1}>1</option><option value={2}>2</option><option value={3}>3</option><option value={4}>4</option><option value={5}>5</option><option value={-1}>{t('Cuối', 'Last')}</option>
-                  </select>
-                </div>
-                <div>
-                  <label for="repeat-weekday">{t('Thứ', 'Weekday')}</label>
-                  <select id="repeat-weekday" bind:value={repeatNthWeekday}>
-                    {#each [t('Chủ nhật','Sunday'),t('Thứ hai','Monday'),t('Thứ ba','Tuesday'),t('Thứ tư','Wednesday'),t('Thứ năm','Thursday'),t('Thứ sáu','Friday'),t('Thứ bảy','Saturday')] as day, i}
-                      <option value={i}>{day}</option>
-                    {/each}
-                  </select>
-                </div>
-              </div>
-            {/if}
-          {/if}
-
-          <label for="repeat-end">{t('Kết thúc theo', 'End by')}</label>
-          <select id="repeat-end" bind:value={repeatEnd}>
-            <option value="count">{t('Số buổi', 'Occurrence count')}</option>
-            <option value="until">{t('Ngày', 'Date')}</option>
-            <option value="infinite">{t('Không có ngày kết thúc', 'No end date')}</option>
-          </select>
-
-          {#if repeatEnd === 'count'}
-            <label for="repeat-count">{t('Số buổi', 'Number of occurrences')}</label>
-            <input id="repeat-count" type="number" min="1" max="10000" bind:value={repeatCount} required />
-          {:else if repeatEnd === 'until'}
-            <label for="repeat-until">{t('Ngày cuối (bao gồm)', 'Last date (inclusive)')}</label>
-            <input id="repeat-until" type="date" bind:value={repeatUntil} required />
-          {:else}
-            <Banner kind="warning" text={t('Chuỗi không có ngày kết thúc chỉ được quét từng cửa sổ 12 tháng và chỉ hỗ trợ đến năm 2400. Giờ không tồn tại hoặc mơ hồ do DST có thể làm worker ngừng quét; khi worker lỗi hoặc quá hạn, cảnh báo có thể thiếu và màn hình có thể chuyển Không xác định.', 'A series without an end date is scanned in 12-month windows and supported only through year 2400. A nonexistent or ambiguous DST time can stop the worker scan; when the worker fails or is overdue, alerts may be incomplete and displays may become Unknown.')} />
-          {/if}
-
-          <div class="ui-form-actions">
-            <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends}>{seriesEdit ? t('Lưu thay đổi chuỗi', 'Save series changes') : t('Tạo chuỗi', 'Create series')}</button>
-            {#if seriesEdit}<button class="secondary" type="button" onclick={clear} disabled={busy}>{t('Hủy sửa chuỗi', 'Cancel series edit')}</button>{/if}
-          </div>
-        </form>
-      {/if}
-    </aside>
-  </div>
+    </Modal>
+  {/if}
 </section>
 
 <style>
@@ -777,17 +839,6 @@
     font-size: 0.86rem;
   }
 
-  .form-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-
-  .form-head h3 {
-    margin: 0;
-  }
-
   .checkbox-card {
     display: flex;
     align-items: center;
@@ -809,16 +860,6 @@
     display: grid;
     gap: 0.3rem;
     min-width: 0;
-  }
-
-  .series-inherit-note {
-    margin: 0;
-    padding: 0.55rem 0.75rem;
-    border-radius: var(--radius-sm);
-    background: var(--bg-surface);
-    border: 1px dashed var(--border-strong);
-    font-size: 0.82rem;
-    color: var(--ink-muted);
   }
 
   .weekdays-fieldset {

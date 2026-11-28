@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
+  import Modal from './Modal.svelte';
+  let confirmDialog;
   import Rooms from './Rooms.svelte';
   import Bookings from './Bookings.svelte';
   import Devices from './Devices.svelte';
@@ -21,12 +24,15 @@
   let usersLoading = false;
   let usersError = '';
   let notice = '';
+  let createUserModalOpen = false;
+  let createUserError = '';
   let newUsername = '';
   let newPassword = '';
   let showNewPassword = false;
   let resetUser = null;
   let resetPassword = '';
   let showResetPassword = false;
+  let resetPasswordError = '';
   const views = ['overview', 'rooms', 'bookings', 'devices', 'users'];
   let activeView = views.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : 'overview';
   let overview = null;
@@ -74,7 +80,44 @@
     }
   }
 
-  async function updateUser(path, body) {
+  function clearCreateUser() {
+    createUserModalOpen = false;
+    createUserError = '';
+    newUsername = '';
+    newPassword = '';
+    showNewPassword = false;
+  }
+
+  function openCreateUser() {
+    clearCreateUser();
+    notice = '';
+    createUserModalOpen = true;
+  }
+
+  function closeCreateUserModal() {
+    if (busy) return;
+    clearCreateUser();
+  }
+
+  function clearReset() {
+    resetUser = null;
+    resetPassword = '';
+    showResetPassword = false;
+    resetPasswordError = '';
+  }
+
+  function openResetPassword(user) {
+    clearReset();
+    notice = '';
+    resetUser = user;
+  }
+
+  function cancelReset() {
+    if (busy) return;
+    clearReset();
+  }
+
+  async function updateUser(path, body, onError = (msg) => usersError = msg) {
     busy = true;
     usersError = '';
     notice = '';
@@ -88,13 +131,13 @@
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (response.status === 409 && path.endsWith('/disable')) {
-        usersError = ['Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.', 'Cannot disable the last active account.'];
+        onError(['Không thể vô hiệu hóa tài khoản hoạt động cuối cùng.', 'Cannot disable the last active account.']);
         return false;
       }
       if (response.status !== 201 && response.status !== 204) throw new Error();
       return true;
     } catch {
-      usersError = ['Không thể thực hiện thao tác. Vui lòng thử lại.', 'Could not complete the operation. Please try again.'];
+      onError(['Không thể thực hiện thao tác. Vui lòng thử lại.', 'Could not complete the operation. Please try again.']);
       return false;
     } finally {
       busy = false;
@@ -104,43 +147,37 @@
   async function createUser(event) {
     event.preventDefault();
     if (!newUsername.trim() || !newPassword) return;
-    if (await updateUser('/api/users', { username: newUsername.trim(), password: newPassword })) {
-      newUsername = '';
-      newPassword = '';
-      showNewPassword = false;
+    createUserError = '';
+    if (await updateUser('/api/users', { username: newUsername.trim(), password: newPassword }, (msg) => createUserError = msg)) {
+      clearCreateUser();
       notice = ['Đã tạo tài khoản.', 'Account created.'];
       await loadUsers();
     }
   }
 
   async function disableUser(user) {
-    if (!window.confirm(t(`Vô hiệu hóa tài khoản "${user.username}"? Tài khoản này sẽ không thể đăng nhập.`, `Disable account "${user.username}"? This account will no longer be able to sign in.`))) return;
+    if (!await confirmDialog.ask(t(`Vô hiệu hóa tài khoản "${user.username}"? Tài khoản này sẽ không thể đăng nhập.`, `Disable account "${user.username}"? This account will no longer be able to sign in.`))) return;
     if (await updateUser(`/api/users/${encodeURIComponent(user.id)}/disable`)) {
       if (user.username === session.username) {
         await logout();
         return;
       }
-      if (resetUser?.id === user.id) cancelReset();
+      if (resetUser?.id === user.id) clearReset();
       notice = ['Đã vô hiệu hóa tài khoản.', 'Account disabled.'];
       await loadUsers();
     }
   }
 
-  function cancelReset() {
-    resetUser = null;
-    resetPassword = '';
-    showResetPassword = false;
-  }
-
   async function changePassword(event) {
     event.preventDefault();
     if (!resetUser || !resetPassword) return;
-    if (await updateUser(`/api/users/${encodeURIComponent(resetUser.id)}/password`, { password: resetPassword })) {
+    resetPasswordError = '';
+    if (await updateUser(`/api/users/${encodeURIComponent(resetUser.id)}/password`, { password: resetPassword }, (msg) => resetPasswordError = msg)) {
       if (resetUser.username === session.username) {
         await logout();
         return;
       }
-      cancelReset();
+      clearReset();
       notice = ['Đã đặt lại mật khẩu.', 'Password reset.'];
     }
   }
@@ -223,10 +260,8 @@
         users = [];
         usersError = '';
         notice = '';
-        newUsername = '';
-        newPassword = '';
-        showNewPassword = false;
-        cancelReset();
+        clearCreateUser();
+        clearReset();
         username = '';
         password = '';
         showPassword = false;
@@ -242,6 +277,8 @@
 
   if (!displayMatch) onMount(loadSession);
 </script>
+
+<ConfirmDialog bind:this={confirmDialog} language={session?.language || 'vi'} />
 
 <svelte:head><title>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</title></svelte:head>
 
@@ -420,86 +457,105 @@
             <h2 id="users-heading">{t('Quản lý tài khoản', 'Account management')}</h2>
             <p>{t('Quản lý quyền truy cập và mật khẩu đăng nhập.', 'Manage access and login passwords.')}</p>
           </div>
+          <div class="section-actions">
+            <button type="button" disabled={busy} onclick={openCreateUser}>
+              <Icon name="plus" />
+              <span>{t('Tạo tài khoản', 'Create account')}</span>
+            </button>
+          </div>
         </div>
 
         {#if usersError}<Banner kind="error" text={t(...usersError)} />{/if}
         {#if notice}<Banner kind="success" text={t(...notice)} />{/if}
 
-        <div class="ui-split">
-          <div>
-            <h3>{t('Danh sách tài khoản', 'Accounts')}</h3>
-            {#if usersLoading}
-              <p role="status" class="ui-loading">
-                <span class="ui-spinner" aria-hidden="true"></span>
-                <span>{t('Đang tải danh sách tài khoản…', 'Loading accounts…')}</span>
-              </p>
-            {:else if usersError && users.length === 0}
-              <button class="secondary" type="button" onclick={loadUsers}>{t('Thử tải lại', 'Retry')}</button>
-            {:else if users.length === 0}
-              <div class="ui-empty"><p>{t('Chưa có tài khoản nào.', 'No accounts yet.')}</p></div>
-            {:else}
-              <ul class="ui-card-list">
-                {#each users as user (user.id)}
-                  <li class="ui-card user-card" class:is-editing={resetUser?.id === user.id}>
-                    <div class="user-identity">
-                      <span class="user-avatar" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>
-                      <div>
-                        <div class="user-name-row">
-                          <strong>{user.username}</strong>
-                          {#if user.username === session.username}
-                            <span class="ui-pill ui-pill--neutral">{t('Bạn', 'You')}</span>
-                          {/if}
-                        </div>
-                        <span class={user.active ? 'ui-pill ui-pill--success' : 'ui-pill ui-pill--neutral'}>
-                          {user.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
-                        </span>
+        <div class="ui-view-body">
+          <h3>{t('Danh sách tài khoản', 'Accounts')}</h3>
+          {#if usersLoading}
+            <p role="status" class="ui-loading">
+              <span class="ui-spinner" aria-hidden="true"></span>
+              <span>{t('Đang tải danh sách tài khoản…', 'Loading accounts…')}</span>
+            </p>
+          {:else if usersError && users.length === 0}
+            <button class="secondary" type="button" onclick={loadUsers}>{t('Thử tải lại', 'Retry')}</button>
+          {:else if users.length === 0}
+            <div class="ui-empty"><p>{t('Chưa có tài khoản nào.', 'No accounts yet.')}</p></div>
+          {:else}
+            <ul class="ui-card-list">
+              {#each users as user (user.id)}
+                <li class="ui-card user-card" class:is-editing={resetUser?.id === user.id}>
+                  <div class="user-identity">
+                    <span class="user-avatar" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>
+                    <div>
+                      <div class="user-name-row">
+                        <strong>{user.username}</strong>
+                        {#if user.username === session.username}
+                          <span class="ui-pill ui-pill--neutral">{t('Bạn', 'You')}</span>
+                        {/if}
                       </div>
+                      <span class={user.active ? 'ui-pill ui-pill--success' : 'ui-pill ui-pill--neutral'}>
+                        {user.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
+                      </span>
                     </div>
-                    {#if user.active}
-                      <div class="actions">
-                        <button class="secondary" type="button" disabled={busy} aria-label={`${t('Đặt lại mật khẩu cho', 'Reset password for')} ${user.username}`} onclick={() => { cancelReset(); resetUser = user; }}>{t('Đặt lại mật khẩu', 'Reset password')}</button>
-                        <button class="danger" type="button" disabled={busy} aria-label={`${t('Vô hiệu hóa', 'Disable')} ${user.username}`} onclick={() => disableUser(user)}>{t('Vô hiệu hóa', 'Disable')}</button>
-                      </div>
-                    {/if}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-
-          <div class="ui-sticky-pane">
-            {#if resetUser}
-              <form class="ui-form-editing" onsubmit={changePassword}>
-                <h3>{t('Đặt lại mật khẩu cho', 'Reset password for')} {resetUser.username}</h3>
-                <label for="reset-password">{t('Mật khẩu mới', 'New password')}</label>
-                <div class="ui-pw-wrap">
-                  <input id="reset-password" name="new-password" type={showResetPassword ? 'text' : 'password'} autocomplete="new-password" bind:value={resetPassword} required maxlength="1024" />
-                  <button type="button" class="ui-pw-toggle" aria-label={showResetPassword ? t('Ẩn mật khẩu', 'Hide password') : t('Hiện mật khẩu', 'Show password')} aria-pressed={showResetPassword} onclick={() => showResetPassword = !showResetPassword}>
-                    <Icon name={showResetPassword ? 'eye-off' : 'eye'} />
-                  </button>
-                </div>
-                <div class="ui-form-actions">
-                  <button type="submit" disabled={busy}>{t('Lưu mật khẩu', 'Save password')}</button>
-                  <button class="secondary" type="button" disabled={busy} onclick={cancelReset}>{t('Hủy', 'Cancel')}</button>
-                </div>
-              </form>
-            {/if}
-
-            <form onsubmit={createUser}>
-              <h3>{t('Tạo tài khoản', 'Create account')}</h3>
-              <label for="new-username">{t('Tên đăng nhập', 'Username')}</label>
-              <input id="new-username" name="new-username" autocomplete="off" bind:value={newUsername} required maxlength="128" />
-              <label for="new-password">{t('Mật khẩu', 'Password')}</label>
-              <div class="ui-pw-wrap">
-                <input id="new-password" name="new-password" type={showNewPassword ? 'text' : 'password'} autocomplete="new-password" bind:value={newPassword} required maxlength="1024" />
-                <button type="button" class="ui-pw-toggle" aria-label={showNewPassword ? t('Ẩn mật khẩu', 'Hide password') : t('Hiện mật khẩu', 'Show password')} aria-pressed={showNewPassword} onclick={() => showNewPassword = !showNewPassword}>
-                  <Icon name={showNewPassword ? 'eye-off' : 'eye'} />
-                </button>
-              </div>
-              <button type="submit" disabled={busy}>{t('Tạo tài khoản', 'Create account')}</button>
-            </form>
-          </div>
+                  </div>
+                  {#if user.active}
+                    <div class="actions">
+                      <button class="secondary" type="button" disabled={busy} aria-label={`${t('Đặt lại mật khẩu cho', 'Reset password for')} ${user.username}`} onclick={() => openResetPassword(user)}>{t('Đặt lại mật khẩu', 'Reset password')}</button>
+                      <button class="danger" type="button" disabled={busy} aria-label={`${t('Vô hiệu hóa', 'Disable')} ${user.username}`} onclick={() => disableUser(user)}>{t('Vô hiệu hóa', 'Disable')}</button>
+                    </div>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
+
+        <Modal
+          open={createUserModalOpen}
+          title={t('Tạo tài khoản', 'Create account')}
+          {busy}
+          closeLabel={t('Đóng', 'Close')}
+          onclose={closeCreateUserModal}
+        >
+          {#if createUserError}<Banner kind="error" text={t(...createUserError)} />{/if}
+          <form onsubmit={createUser}>
+            <label for="new-username">{t('Tên đăng nhập', 'Username')}</label>
+            <input id="new-username" name="new-username" autocomplete="off" bind:value={newUsername} required maxlength="128" />
+            <label for="new-password">{t('Mật khẩu', 'Password')}</label>
+            <div class="ui-pw-wrap">
+              <input id="new-password" name="new-password" type={showNewPassword ? 'text' : 'password'} autocomplete="new-password" bind:value={newPassword} required maxlength="1024" />
+              <button type="button" class="ui-pw-toggle" aria-label={showNewPassword ? t('Ẩn mật khẩu', 'Hide password') : t('Hiện mật khẩu', 'Show password')} aria-pressed={showNewPassword} onclick={() => showNewPassword = !showNewPassword}>
+                <Icon name={showNewPassword ? 'eye-off' : 'eye'} />
+              </button>
+            </div>
+            <div class="ui-form-actions">
+              <button type="submit" disabled={busy}>{t('Tạo tài khoản', 'Create account')}</button>
+              <button class="secondary" type="button" disabled={busy} onclick={closeCreateUserModal}>{t('Hủy', 'Cancel')}</button>
+            </div>
+          </form>
+        </Modal>
+
+        <Modal
+          open={resetUser !== null}
+          title={resetUser ? `${t('Đặt lại mật khẩu cho', 'Reset password for')} ${resetUser.username}` : ''}
+          {busy}
+          closeLabel={t('Đóng', 'Close')}
+          onclose={cancelReset}
+        >
+          {#if resetPasswordError}<Banner kind="error" text={t(...resetPasswordError)} />{/if}
+          <form onsubmit={changePassword}>
+            <label for="reset-password">{t('Mật khẩu mới', 'New password')}</label>
+            <div class="ui-pw-wrap">
+              <input id="reset-password" name="new-password" type={showResetPassword ? 'text' : 'password'} autocomplete="new-password" bind:value={resetPassword} required maxlength="1024" />
+              <button type="button" class="ui-pw-toggle" aria-label={showResetPassword ? t('Ẩn mật khẩu', 'Hide password') : t('Hiện mật khẩu', 'Show password')} aria-pressed={showResetPassword} onclick={() => showResetPassword = !showResetPassword}>
+                <Icon name={showResetPassword ? 'eye-off' : 'eye'} />
+              </button>
+            </div>
+            <div class="ui-form-actions">
+              <button type="submit" disabled={busy}>{t('Lưu mật khẩu', 'Save password')}</button>
+              <button class="secondary" type="button" disabled={busy} onclick={cancelReset}>{t('Hủy', 'Cancel')}</button>
+            </div>
+          </form>
+        </Modal>
       </section>
     </div>
   </main>

@@ -15,7 +15,7 @@ int-go = ["go"]
 lint-go = ["go"]
 
 [test.gates.unit-go]
-command = ["sh", "-c", "go test ./... && bun web/src/timezone.test.js && bun web/src/kiosk-time.test.js && bun web/src/display-layout.test.js && bun web/src/display-schedule.test.js"]
+command = ["sh", "-c", "go test ./... && bun web/src/timezone.test.js && bun web/src/kiosk-time.test.js && bun web/src/display-layout.test.js && bun web/src/display-schedule.test.js && bun web/src/no-native-dialogs.test.js"]
 setup_command = ["sh", "-c", "bun install --cwd web --frozen-lockfile && bun run --cwd web build"]
 
 [test.gates.int-go]
