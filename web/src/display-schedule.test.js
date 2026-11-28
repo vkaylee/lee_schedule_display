@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { displaySchedule, formatDuration, meetingProgress } from './display-schedule.js';
+import { displaySchedule, formatDuration, formatScheduleDateTime, meetingProgress } from './display-schedule.js';
 
 const entries = [{ starts: 100, ends: 200 }, { starts: 300, ends: 400 }, { starts: 500, ends: 600 }, { starts: 700, ends: 800 }, { starts: 900, ends: 1000 }];
 assert.deepEqual(displaySchedule(entries, 150), { current: entries[0], upcoming: entries.slice(1, 4) });
@@ -30,6 +30,19 @@ assert.equal(formatDuration(3600), '1 giờ');
 assert.equal(formatDuration(3600, 'en'), '1h');
 assert.equal(formatDuration(5400), '1g 30p');
 assert.equal(formatDuration(5400, 'en'), '1h 30m');
+assert.equal(formatDuration(86400), '1 ngày');
+assert.equal(formatDuration(90000), '1 ngày 1 giờ');
+assert.equal(formatDuration(176400), '2 ngày 1 giờ');
+assert.equal(formatDuration(176460, 'en'), '2d 1h 1m');
+assert.equal(formatScheduleDateTime(1798761600, 1798761600, 'UTC', 'vi-VN'), '00:00');
+assert.match(formatScheduleDateTime(1798761600, 1798848000, 'UTC', 'en-US'), /^1\/1,? 12:00\sAM$/);
+const start = Date.parse('2026-11-30T07:30:00Z') / 1000;
+const end = Date.parse('2026-11-30T08:00:00Z') / 1000;
+const tomorrow = Date.parse('2026-12-01T00:00:00Z') / 1000;
+assert.equal(formatScheduleDateTime(end, start, 'UTC', 'vi-VN'), '08:00');
+assert.match(formatScheduleDateTime(tomorrow, start, 'UTC', 'vi-VN'), /^1\/12 /);
+// Same UTC date can span two calendar days in the display timezone.
+assert.match(formatScheduleDateTime(end, start, 'America/Los_Angeles', 'en-US'), /^11\/30 /);
 
 assert.equal(meetingProgress(null, 150), 0);
 assert.equal(meetingProgress({ starts: 100, ends: 100 }, 100), 0);

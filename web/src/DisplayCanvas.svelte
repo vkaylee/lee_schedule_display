@@ -1,6 +1,6 @@
 <script>
   import Icon from './Icon.svelte';
-  import { displaySchedule, formatDuration, meetingProgress } from './display-schedule.js';
+  import { displaySchedule, formatDuration, formatScheduleDateTime, meetingProgress } from './display-schedule.js';
   import { canvasScale, gridCell, hexColorRe, moveBlock, resizeEdges } from './display-layout.js';
 
   let { config, data, statuses = {}, zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {}, oninspect = () => {} } = $props();
@@ -25,6 +25,7 @@
   const entryTitle = (block, entry) => (!entry || !hasPart(block, 'title')) ? '' : (entry.private ? t('Cuộc họp riêng tư', 'Private meeting') : (entry.title || ''));
   const entryOrganizer = (block, entry) => (!entry || entry.private || !hasPart(block, 'organizer')) ? '' : (entry.organizer || '');
   const time = (seconds) => new Date(seconds * 1000).toLocaleTimeString(locale, { timeZone: zone, hour: '2-digit', minute: '2-digit' });
+  const scheduleTime = (seconds, now) => formatScheduleDateTime(seconds, now, zone, locale);
   const xMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
   const yMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
   function blockStyle(block) {
@@ -324,6 +325,8 @@
           <ul class="upcoming-list">
             {#each schedule.upcoming as entry, index}
               {@const untilStart = index === 0 ? formatDuration(entry.starts - scheduleNow, language) : ''}
+              {@const startTime = scheduleTime(entry.starts, scheduleNow)}
+              {@const endTime = scheduleTime(entry.ends, entry.starts)}
               {@const slotDuration = formatDuration(entry.ends - entry.starts, language)}
               {@const itemTitle = entryTitle(block, entry)}
               {@const itemOrganizer = entryOrganizer(block, entry)}
@@ -331,7 +334,7 @@
                 <div class="upcoming-time-wrap">
                   <span class="upcoming-dot" aria-hidden="true"></span>
                   <div>
-                    <strong class="upcoming-range">{time(entry.starts)} – {time(entry.ends)}</strong>
+                    <strong class="upcoming-range">{startTime} – {endTime}</strong>
                     {#if index === 0 && hasPart(block, 'relative')}
                       <span class="upcoming-relative">{untilStart ? `${t('Kế tiếp', 'Next')} · ${t('Sau', 'In')} ${untilStart}` : t('Kế tiếp', 'Next')}</span>
                     {/if}
