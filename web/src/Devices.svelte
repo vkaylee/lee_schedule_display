@@ -10,7 +10,7 @@
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), error = $state(''), busy = $state(false);
-  let createModalOpen = $state(false), createError = $state('');
+  let createModalOpen = $state(false), createError = $state(''), cloneSource = $state(null);
   async function load() {
     error = '';
     try {
@@ -21,7 +21,18 @@
     finally { loading = false; }
   }
   function openCreate() {
+    cloneSource = null;
     name = '';
+    createError = '';
+    createModalOpen = true;
+  }
+  function openClone(device) {
+    cloneSource = device;
+    const suffix = t(' (Bản sao)', ' (Copy)');
+    const encoder = new TextEncoder();
+    name = device.name;
+    while (encoder.encode(name + suffix).length > 128) name = Array.from(name).slice(0, -1).join('');
+    name = name.trimEnd() + suffix;
     createError = '';
     createModalOpen = true;
   }
@@ -34,10 +45,18 @@
   async function create(event) {
     event.preventDefault(); busy = true; createError = '';
     try {
-      const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
+      if (!name.trim()) {
+        createError = ['Nhập tên thiết bị.', 'Enter a device name.'];
+        return;
+      }
+      if (new TextEncoder().encode(name.trim()).length > 128) {
+        createError = ['Tên thiết bị không được vượt quá 128 byte.', 'Device name must not exceed 128 bytes.'];
+        return;
+      }
+      const response = await fetch(cloneSource ? `/api/devices/${cloneSource.id}/clone` : '/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
       if (!response.ok) throw new Error();
       createModalOpen = false; name = ''; await load();
-    } catch { createError = ['Không thể tạo thiết bị.', 'Could not create device.']; }
+    } catch { createError = cloneSource ? ['Không thể nhân bản thiết bị. Kiểm tra thiết bị nguồn và thử lại.', 'Could not clone device. Check the source device and try again.'] : ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
   }
   async function setLanguage(device, event) {
@@ -131,6 +150,10 @@
                   <span>{t('Thiết kế màn hình', 'Design display')}</span>
                 </button>
 
+                <button class="secondary" type="button" disabled={busy || editing !== null} aria-label={`${t('Nhân bản', 'Clone')} ${device.name}`} onclick={() => openClone(device)}>
+                  {t('Nhân bản', 'Clone')}
+                </button>
+
                 <label class="inline-lang">
                   <span>{t('Ngôn ngữ', 'Language')} <span class="sr-only">{device.name}</span></span>
                   <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}>
@@ -161,7 +184,7 @@
 
   <Modal
     open={createModalOpen}
-    title={t('Đăng ký thiết bị', 'Register device')}
+    title={cloneSource ? t('Nhân bản màn hình', 'Clone display') : t('Đăng ký thiết bị', 'Register device')}
     {busy}
     closeLabel={t('Đóng', 'Close')}
     onclose={closeCreateModal}
@@ -171,7 +194,7 @@
       <label for="device-name">{t('Tên thiết bị', 'Device name')}</label>
       <input id="device-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: iPad Cửa Phòng A', 'e.g. Lobby Tablet 01')} />
       <div class="ui-form-actions">
-        <button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button>
+        <button type="submit" disabled={busy}>{cloneSource ? t('Nhân bản', 'Clone') : t('Tạo thiết bị', 'Create device')}</button>
         <button class="secondary" type="button" disabled={busy} onclick={closeCreateModal}>{t('Hủy', 'Cancel')}</button>
       </div>
     </form>

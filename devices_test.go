@@ -60,6 +60,95 @@ func TestKioskScheduleLimitHasSafeHorizon(t *testing.T) {
 	}
 }
 
+func TestCloneDeviceCopiesConfigAndDropsUnavailableRooms(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err = migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if _, err = db.Exec(`INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO sessions VALUES(?,1,'csrf',?); INSERT INTO rooms(id,name,active) VALUES(1,'active',1),(2,'inactive',0); INSERT INTO devices(name,language,public_id) VALUES('source','en','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')`, tokenHash(strings.Repeat("a", 43)), now+3600); err != nil {
+		t.Fatal(err)
+	}
+	config := defaultDisplayConfig()
+	config.Blocks[2].RoomID = 1
+	config.Blocks[3].RoomID = 2
+	config.Blocks[4].RoomID = 999
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec("UPDATE devices SET display_config=? WHERE id=1", string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	h := handlerWithAuth(db, "https://example.test", netip.Addr{})
+	request := func(withSession, withCSRF bool, id string, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "https://example.test/api/devices/"+id+"/clone", strings.NewReader(body))
+		r.Header.Set("Origin", "https://example.test")
+		if withSession {
+			r.AddCookie(&http.Cookie{Name: "__Host-session", Value: strings.Repeat("a", 43)})
+		}
+		if withCSRF {
+			r.Header.Set("X-CSRF-Token", "csrf")
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := request(false, true, "1", `{"name":"copy"}`); w.Code != http.StatusUnauthorized {
+		t.Fatal(w.Code)
+	}
+	if w := request(true, false, "1", `{"name":"copy"}`); w.Code != http.StatusForbidden {
+		t.Fatal(w.Code)
+	}
+	if w := request(true, true, "1", `{"name":"  "}`); w.Code != http.StatusBadRequest {
+		t.Fatal(w.Code)
+	}
+	w := request(true, true, "1", `{"name":"copy"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var response struct {
+		ID       int64  `json:"id"`
+		PublicID string `json:"public_id"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	var cloneID int64
+	var cloneName, cloneLanguage, publicID, clonedRaw string
+	if err = db.QueryRow("SELECT id,name,language,public_id,display_config FROM devices WHERE name='copy'").Scan(&cloneID, &cloneName, &cloneLanguage, &publicID, &clonedRaw); err != nil {
+		t.Fatal(err)
+	}
+	if cloneID == 1 || response.ID != cloneID || response.PublicID != publicID || cloneName != "copy" || cloneLanguage != "en" || publicID == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || len(publicID) != 32 {
+		t.Fatalf("unexpected clone %d %s %s %s", cloneID, cloneName, cloneLanguage, publicID)
+	}
+	var cloned displayConfig
+	if err = json.Unmarshal([]byte(clonedRaw), &cloned); err != nil {
+		t.Fatal(err)
+	}
+	if cloned.Organization != config.Organization || len(cloned.Blocks) != len(config.Blocks) || cloned.Blocks[2].RoomID != 1 || cloned.Blocks[3].RoomID != 0 || cloned.Blocks[4].RoomID != 0 {
+		t.Fatalf("unexpected cloned config: %+v", cloned)
+	}
+	if w := request(true, true, "999", `{"name":"missing"}`); w.Code != http.StatusNotFound {
+		t.Fatal(w.Code)
+	}
+	if _, err = db.Exec("UPDATE devices SET revoked=1 WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(true, true, "1", `{"name":"revoked"}`); w.Code != http.StatusNotFound {
+		t.Fatal(w.Code)
+	}
+	var count int
+	if err = db.QueryRow("SELECT count(*) FROM devices").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("device count=%d err=%v", count, err)
+	}
+}
+
 func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
