@@ -209,6 +209,32 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if err = db.QueryRow("SELECT public_id FROM devices WHERE id=1").Scan(&publicID); err != nil {
 		t.Fatal(err)
 	}
+	if w = request("PUT", "/api/devices/1/name", `{"name":"renamed"}`, false, ""); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	noRenameCSRF := httptest.NewRequest("PUT", "https://example.test/api/devices/1/name", strings.NewReader(`{"name":"renamed"}`))
+	noRenameCSRF.Header.Set("Origin", "https://example.test")
+	noRenameCSRF.AddCookie(&http.Cookie{Name: "__Host-session", Value: token})
+	denied := httptest.NewRecorder()
+	h.ServeHTTP(denied, noRenameCSRF)
+	if denied.Code != 403 {
+		t.Fatal(denied.Code)
+	}
+	for _, body := range []string{`{"name":""}`, `{"name":" x "}`, `{"name":"` + strings.Repeat("é", 65) + `"}`, `{"name":"ok","extra":1}`, `{"name":"ok"} {}`} {
+		if w = request("PUT", "/api/devices/1/name", body, true, ""); w.Code != 400 {
+			t.Fatalf("%s: %d", body, w.Code)
+		}
+	}
+	if w = request("PUT", "/api/devices/999/name", `{"name":"renamed"}`, true, ""); w.Code != 404 {
+		t.Fatal(w.Code)
+	}
+	if w = request("PUT", "/api/devices/1/name", `{"name":"renamed"}`, true, ""); w.Code != 204 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var gotName, gotPublicID, gotConfig string
+	if err = db.QueryRow("SELECT name,public_id,display_config FROM devices WHERE id=1").Scan(&gotName, &gotPublicID, &gotConfig); err != nil || gotName != "renamed" || gotPublicID != publicID || gotConfig != string(raw) {
+		t.Fatal(gotName, gotPublicID, err)
+	}
 	w = request("GET", "/api/display/"+publicID, "", false, "")
 	if w.Code != 200 || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "other room") || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, now+100)) {
 		t.Fatal(w.Code, w.Body.String())
@@ -263,6 +289,13 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	}
 	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 404 {
 		t.Fatal(w.Code)
+	}
+	if w = request("PUT", "/api/devices/1/name", `{"name":"revoked name"}`, true, ""); w.Code != 204 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var revoked bool
+	if err = db.QueryRow("SELECT name,public_id,display_config,revoked FROM devices WHERE id=1").Scan(&gotName, &gotPublicID, &gotConfig, &revoked); err != nil || gotName != "revoked name" || gotPublicID != publicID || gotConfig != string(raw) || !revoked {
+		t.Fatal(gotName, gotPublicID, revoked, err)
 	}
 	if w = request("PUT", "/api/devices/1/language", `{"language":"vi"}`, true, ""); w.Code != 404 {
 		t.Fatal(w.Code)

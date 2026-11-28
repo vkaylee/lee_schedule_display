@@ -153,7 +153,14 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 			var name string
 			var id int64
 			var err error
-			if action == "create" {
+			if action != "create" {
+				id, err = strconv.ParseInt(r.PathValue("id"), 10, 64)
+				if err != nil || id <= 0 {
+					http.Error(w, "invalid request", 400)
+					return
+				}
+			}
+			if action == "create" || action == "rename" {
 				var input struct {
 					Name string `json:"name"`
 				}
@@ -164,12 +171,6 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 					return
 				}
 				name = input.Name
-			} else {
-				id, err = strconv.ParseInt(r.PathValue("id"), 10, 64)
-				if err != nil || id <= 0 {
-					http.Error(w, "invalid request", 400)
-					return
-				}
 			}
 			tx, err := db.Begin()
 			if err != nil {
@@ -195,7 +196,9 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 				_, err = tx.Exec("INSERT INTO devices(name,public_id) VALUES(?,lower(hex(randomblob(16))))", name)
 			} else {
 				var result sql.Result
-				if action == "reactivate" {
+				if action == "rename" {
+					result, err = tx.Exec("UPDATE devices SET name=? WHERE id=?", name, id)
+				} else if action == "reactivate" {
 					result, err = tx.Exec("UPDATE devices SET revoked=0 WHERE id=? AND revoked=1", id)
 				} else {
 					result, err = tx.Exec("UPDATE devices SET revoked=1 WHERE id=? AND revoked=0", id)
@@ -225,6 +228,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 	}
 	mux.HandleFunc("POST /api/devices", mutate("create"))
 	mux.HandleFunc("POST /api/devices/{id}/clone", post(cloneDevice(db, session)))
+	mux.HandleFunc("PUT /api/devices/{id}/name", mutate("rename"))
 	mux.HandleFunc("POST /api/devices/{id}/revoke", mutate("revoke"))
 	mux.HandleFunc("POST /api/devices/{id}/reactivate", mutate("reactivate"))
 	mux.HandleFunc("PUT /api/devices/{id}/language", post(func(w http.ResponseWriter, r *http.Request) {

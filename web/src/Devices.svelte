@@ -10,7 +10,7 @@
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), error = $state(''), busy = $state(false);
-  let createModalOpen = $state(false), createError = $state(''), cloneSource = $state(null);
+  let createModalOpen = $state(false), createError = $state(''), cloneSource = $state(null), renameTarget = $state(null);
   async function load() {
     error = '';
     try {
@@ -22,17 +22,26 @@
   }
   function openCreate() {
     cloneSource = null;
+    renameTarget = null;
     name = '';
     createError = '';
     createModalOpen = true;
   }
   function openClone(device) {
+    renameTarget = null;
     cloneSource = device;
     const suffix = t(' (Bản sao)', ' (Copy)');
     const encoder = new TextEncoder();
     name = device.name;
     while (encoder.encode(name + suffix).length > 128) name = Array.from(name).slice(0, -1).join('');
     name = name.trimEnd() + suffix;
+    createError = '';
+    createModalOpen = true;
+  }
+  function openRename(device) {
+    cloneSource = null;
+    renameTarget = device;
+    name = device.name;
     createError = '';
     createModalOpen = true;
   }
@@ -53,10 +62,11 @@
         createError = ['Tên thiết bị không được vượt quá 128 byte.', 'Device name must not exceed 128 bytes.'];
         return;
       }
-      const response = await fetch(cloneSource ? `/api/devices/${cloneSource.id}/clone` : '/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
+      const url = renameTarget ? `/api/devices/${renameTarget.id}/name` : cloneSource ? `/api/devices/${cloneSource.id}/clone` : '/api/devices';
+      const response = await fetch(url, {method:renameTarget ? 'PUT' : 'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
       if (!response.ok) throw new Error();
       createModalOpen = false; name = ''; await load();
-    } catch { createError = cloneSource ? ['Không thể nhân bản thiết bị. Kiểm tra thiết bị nguồn và thử lại.', 'Could not clone device. Check the source device and try again.'] : ['Không thể tạo thiết bị.', 'Could not create device.']; }
+    } catch { createError = renameTarget ? ['Không thể đổi tên thiết bị.', 'Could not rename device.'] : cloneSource ? ['Không thể nhân bản thiết bị. Kiểm tra thiết bị nguồn và thử lại.', 'Could not clone device. Check the source device and try again.'] : ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
   }
   async function setLanguage(device, event) {
@@ -144,6 +154,9 @@
             </div>
 
             <div class="device-controls">
+              <button class="secondary" type="button" disabled={busy || editing !== null} aria-label={`${t('Đổi tên', 'Rename')} ${device.name}`} onclick={() => openRename(device)}>
+                {t('Đổi tên', 'Rename')}
+              </button>
               {#if !device.revoked}
                 <button class="secondary" type="button" disabled={busy || editing !== null} onclick={() => editing = device}>
                   <Icon name="layout" />
@@ -184,7 +197,7 @@
 
   <Modal
     open={createModalOpen}
-    title={cloneSource ? t('Nhân bản màn hình', 'Clone display') : t('Đăng ký thiết bị', 'Register device')}
+    title={renameTarget ? t('Đổi tên thiết bị', 'Rename device') : cloneSource ? t('Nhân bản màn hình', 'Clone display') : t('Đăng ký thiết bị', 'Register device')}
     {busy}
     closeLabel={t('Đóng', 'Close')}
     onclose={closeCreateModal}
@@ -194,7 +207,7 @@
       <label for="device-name">{t('Tên thiết bị', 'Device name')}</label>
       <input id="device-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: iPad Cửa Phòng A', 'e.g. Lobby Tablet 01')} />
       <div class="ui-form-actions">
-        <button type="submit" disabled={busy}>{cloneSource ? t('Nhân bản', 'Clone') : t('Tạo thiết bị', 'Create device')}</button>
+        <button type="submit" disabled={busy}>{renameTarget ? t('Lưu', 'Save') : cloneSource ? t('Nhân bản', 'Clone') : t('Tạo thiết bị', 'Create device')}</button>
         <button class="secondary" type="button" disabled={busy} onclick={closeCreateModal}>{t('Hủy', 'Cancel')}</button>
       </div>
     </form>
