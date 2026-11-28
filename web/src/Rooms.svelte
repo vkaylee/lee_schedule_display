@@ -111,6 +111,12 @@
                 <span class={room.active ? 'ui-pill ui-pill--success' : 'ui-pill ui-pill--neutral'}>
                   {room.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
                 </span>
+                {#if room.show_title}
+                  <span class="ui-pill ui-pill--neutral">{t('Hiện tiêu đề', 'Title visible')}</span>
+                {/if}
+                {#if room.show_organizer}
+                  <span class="ui-pill ui-pill--neutral">{t('Hiện người tổ chức', 'Organizer visible')}</span>
+                {/if}
               </div>
             </div>
             <button class="secondary" type="button" disabled={busy} aria-label={`${t('Sửa phòng', 'Edit room')} ${room.name}`} onclick={() => edit(room)}>
@@ -146,7 +152,21 @@
         </label>
       {/if}
 
-      <p>{t('Màn hình công khai chỉ hiển thị thời gian, không hiển thị tiêu đề hoặc người tổ chức.', 'Public displays show times only, never titles or organizers.')}</p>
+      <label class="toggle-row">
+        <input type="checkbox" bind:checked={showTitle} />
+        <span>
+          <strong>{t('Hiển thị tiêu đề cuộc họp trên màn hình', 'Show meeting title on displays')}</strong>
+          <small>{t('Lịch được đánh dấu riêng tư vẫn luôn ẩn tiêu đề.', 'Bookings marked private still hide the title.')}</small>
+        </span>
+      </label>
+
+      <label class="toggle-row">
+        <input type="checkbox" bind:checked={showOrganizer} />
+        <span>
+          <strong>{t('Hiển thị người tổ chức trên màn hình', 'Show organizer on displays')}</strong>
+          <small>{t('Lịch được đánh dấu riêng tư vẫn luôn ẩn người tổ chức.', 'Bookings marked private still hide the organizer.')}</small>
+        </span>
+      </label>
 
       <div class="ui-form-actions">
         <button type="submit" disabled={busy}>{t('Lưu phòng', 'Save room')}</button>

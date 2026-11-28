@@ -7,8 +7,11 @@ import (
 )
 
 type publicEntry struct {
-	Starts int64 `json:"starts"`
-	Ends   int64 `json:"ends"`
+	Starts    int64  `json:"starts"`
+	Ends      int64  `json:"ends"`
+	Title     string `json:"title,omitempty"`
+	Organizer string `json:"organizer,omitempty"`
+	Private   bool   `json:"private,omitempty"`
 }
 type publicRoom struct {
 	Room        string        `json:"room"`
@@ -33,20 +36,34 @@ func readDisplayConfig(raw string) (displayConfig, error) {
 func loadPublicRoom(tx *sql.Tx, roomID, now int64) publicRoom {
 	unavailable := publicRoom{Entries: []publicEntry{}, Unavailable: true}
 	var result publicRoom
-	var active bool
-	if err := tx.QueryRow("SELECT name,active FROM rooms WHERE id=?", roomID).Scan(&result.Room, &active); err != nil || !active {
+	var active, showTitle, showOrganizer bool
+	if err := tx.QueryRow("SELECT name,active,show_title,show_organizer FROM rooms WHERE id=?", roomID).Scan(&result.Room, &active, &showTitle, &showOrganizer); err != nil || !active {
 		return unavailable
 	}
-	rows, err := tx.Query("SELECT starts,ends FROM (SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
+	rows, err := tx.Query("SELECT starts,ends,title,organizer,private FROM (SELECT starts,ends,title,organizer,private FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends,COALESCE(o.title,s.title) AS title,COALESCE(o.organizer,s.organizer) AS organizer,COALESCE(o.private,s.private) AS private FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
 	if err != nil {
 		return unavailable
 	}
 	result.Entries = []publicEntry{}
 	for rows.Next() {
 		var e publicEntry
-		if rows.Scan(&e.Starts, &e.Ends) != nil {
+		var title, organizer string
+		var private bool
+		if rows.Scan(&e.Starts, &e.Ends, &title, &organizer, &private) != nil {
 			rows.Close()
 			return unavailable
+		}
+		if showTitle || showOrganizer {
+			if private {
+				e.Private = true
+			} else {
+				if showTitle {
+					e.Title = title
+				}
+				if showOrganizer {
+					e.Organizer = organizer
+				}
+			}
 		}
 		result.Entries = append(result.Entries, e)
 	}

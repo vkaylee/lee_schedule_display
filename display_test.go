@@ -58,6 +58,8 @@ func TestDisplayWidgetStyleValidation(t *testing.T) {
 	c.Blocks[0].VAlign = "top"
 	c.Blocks[0].SubLayout = "reverse"
 	c.Blocks[0].HideParts = []string{"zone"}
+	c.Blocks[3].HideParts = []string{"title", "organizer"}
+	c.Blocks[4].HideParts = []string{"title", "organizer"}
 	if !validDisplayConfig(c) {
 		t.Fatal("valid widget style rejected")
 	}
@@ -117,7 +119,7 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO sessions(token_hash,user_id,csrf,expires) VALUES(?,1,'csrf',?)`, tokenHash(token), now+3600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO bookings(room_id,title,organizer,private,starts,ends) VALUES(1,'private title','private organizer',0,?,?)`, now+300, now+600); err != nil {
+	if _, err := db.Exec(`INSERT INTO bookings(room_id,title,organizer,private,starts,ends) VALUES(1,'public title','public organizer',0,?,?)`, now+300, now+600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series organizer',1,'{}',1); INSERT INTO series_occurrences(series_id,original_starts,starts,ends) VALUES(1,?,?,?)`, now+700, now+700, now+800); err != nil {
@@ -150,7 +152,7 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 		return w
 	}
 	w := request("GET", "/api/display/"+publicID, "", false)
-	if w.Code != 200 || strings.Contains(w.Body.String(), "private title") || strings.Contains(w.Body.String(), "private organizer") || strings.Contains(w.Body.String(), "series secret") || strings.Contains(w.Body.String(), "series organizer") || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, now+700)) || !strings.Contains(w.Body.String(), `"room":"Room"`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"title":"public title"`) || !strings.Contains(w.Body.String(), `"organizer":"public organizer"`) || strings.Contains(w.Body.String(), "series secret") || strings.Contains(w.Body.String(), "series organizer") || !strings.Contains(w.Body.String(), `"private":true`) || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, now+700)) || !strings.Contains(w.Body.String(), `"room":"Room"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
@@ -208,5 +210,87 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	}
 	if w = request("GET", "/api/display/"+publicID, "", false); w.Code != 404 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestPublicDisplayRoomVisibilityFlagsAndOccurrenceOverrides(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	if _, err := db.Exec(`
+		INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02');
+		INSERT INTO rooms(id,name,active,show_title,show_organizer) VALUES
+			(1,'Title Only',1,1,0),
+			(2,'Organizer Only',1,0,1),
+			(3,'Times Only',1,0,0);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO bookings(room_id,title,organizer,private,starts,ends) VALUES
+			(1,'Standup','Alice',0,?,?),
+			(2,'Review','Bob',0,?,?),
+			(3,'Hidden Title','Hidden Org',1,?,?);
+	`, now+60, now+120, now+60, now+120, now+60, now+120); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO booking_series(id,room_id,title,organizer,private,rule,actor_id) VALUES
+			(1,1,'Series Base','Base Org',0,'{}',1);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO series_occurrences(series_id,original_starts,starts,ends,title,organizer,private) VALUES
+			(1,?,?,?,'Override Title','Override Org',0),
+			(1,?,?,?,'Private Override','Secret Org',1);
+	`, now+200, now+200, now+260, now+300, now+300, now+360); err != nil {
+		t.Fatal(err)
+	}
+	c := defaultDisplayConfig()
+	c.Blocks = []displayBlock{
+		{Type: "room", ID: "r1", RoomID: 1, X: 0, Y: 0, W: 4, H: 1},
+		{Type: "status", ID: "s2", RoomID: 2, X: 0, Y: 1, W: 4, H: 2},
+		{Type: "upcoming", ID: "u3", RoomID: 3, X: 0, Y: 3, W: 4, H: 2},
+	}
+	raw, _ := json.Marshal(c)
+	publicID := strings.Repeat("b", 32)
+	if _, err := db.Exec(`INSERT INTO devices(name,public_id,display_config) VALUES('panel',?,?)`, publicID, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	handlerWithAuth(db, "", netip.Addr{}).ServeHTTP(w, httptest.NewRequest("GET", "/api/display/"+publicID, nil))
+	if w.Code != 200 {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Rooms map[string]publicRoom `json:"rooms"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	r1 := resp.Rooms["1"].Entries
+	if len(r1) != 3 || r1[0].Title != "Standup" || r1[0].Organizer != "" || r1[0].Private ||
+		r1[1].Title != "Override Title" || r1[1].Organizer != "" || r1[1].Private ||
+		r1[2].Title != "" || r1[2].Organizer != "" || !r1[2].Private {
+		t.Fatalf("room 1 entries: %+v", r1)
+	}
+	r2 := resp.Rooms["2"].Entries
+	if len(r2) != 1 || r2[0].Title != "" || r2[0].Organizer != "Bob" || r2[0].Private {
+		t.Fatalf("room 2 entries: %+v", r2)
+	}
+	r3 := resp.Rooms["3"].Entries
+	if len(r3) != 1 || r3[0].Title != "" || r3[0].Organizer != "" || r3[0].Private {
+		t.Fatalf("room 3 entries: %+v", r3)
+	}
+	if strings.Contains(w.Body.String(), "Hidden") || strings.Contains(w.Body.String(), "Secret Org") || strings.Contains(w.Body.String(), "Private Override") {
+		t.Fatalf("exposed hidden/private data: %s", w.Body.String())
 	}
 }

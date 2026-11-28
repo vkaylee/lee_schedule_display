@@ -58,8 +58,8 @@ var widgetHideParts = map[string]map[string]bool{
 	"clock":    {"zone": true, "date": true},
 	"branding": {"eyebrow": true, "logo": true},
 	"room":     {"eyebrow": true, "accentBar": true},
-	"status":   {"pill": true, "icon": true, "until": true, "remaining": true, "progress": true},
-	"upcoming": {"count": true, "relative": true, "duration": true},
+	"status":   {"pill": true, "icon": true, "title": true, "organizer": true, "until": true, "remaining": true, "progress": true},
+	"upcoming": {"count": true, "title": true, "organizer": true, "relative": true, "duration": true},
 	"footer":   {"badge": true, "zone": true},
 }
 

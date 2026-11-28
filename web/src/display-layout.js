@@ -5,8 +5,8 @@ export const widgetParts = {
   clock: ['zone', 'date'],
   branding: ['eyebrow', 'logo'],
   room: ['eyebrow', 'accentBar'],
-  status: ['pill', 'icon', 'until', 'remaining', 'progress'],
-  upcoming: ['count', 'relative', 'duration'],
+  status: ['pill', 'icon', 'title', 'organizer', 'until', 'remaining', 'progress'],
+  upcoming: ['count', 'title', 'organizer', 'relative', 'duration'],
   footer: ['badge', 'zone']
 };
 

@@ -23,6 +23,8 @@
     accentBar: ['Thanh màu bên', 'Accent bar'],
     pill: ['Nhãn HIỆN TẠI', 'CURRENT pill'],
     icon: ['Biểu tượng', 'Status icon'],
+    title: ['Tiêu đề cuộc họp', 'Meeting title'],
+    organizer: ['Người tổ chức', 'Organizer'],
     until: ['Giờ kết thúc / tiếp theo', 'End / next time'],
     remaining: ['Thời gian còn lại', 'Remaining time'],
     progress: ['Thanh tiến độ', 'Progress bar'],
@@ -47,6 +49,27 @@
   let contrastWarning = $derived(block && block.bgColor && block.textColor ? (contrastRatio(block.bgColor, block.textColor) ?? 21) < 4.5 : false);
   let resolutionPending = $derived(config && (String(width || '') !== String(config.width || '') || String(height || '') !== String(config.height || '')));
   let dirty = $derived(config && (resolutionPending || JSON.stringify(config) !== saved));
+  let previewLanguage = $derived(device.language || language);
+  let previewNow = $derived(Math.floor(Date.now() / 1000));
+  let previewEntries = $derived(previewLanguage === 'en'
+    ? [
+        { starts: previewNow - 900, ends: previewNow + 1800, title: 'Weekly Product Sync', organizer: 'Minh Nguyen' },
+        { starts: previewNow + 3600, ends: previewNow + 5400, title: 'Design Review Q4', organizer: 'Lan Tran' },
+        { starts: previewNow + 7200, ends: previewNow + 9000, private: true }
+      ]
+    : [
+        { starts: previewNow - 900, ends: previewNow + 1800, title: 'Họp giao ban tuần', organizer: 'Nguyễn Minh' },
+        { starts: previewNow + 3600, ends: previewNow + 5400, title: 'Đánh giá thiết kế Q4', organizer: 'Trần Lan' },
+        { starts: previewNow + 7200, ends: previewNow + 9000, private: true }
+      ]);
+  let previewData = $derived({
+    rooms: Object.fromEntries(rooms.map(room => [room.id, {
+      room: room.name,
+      entries: room.active ? previewEntries : [],
+      unavailable: !room.active
+    }]))
+  });
+  let previewStatuses = $derived(Object.fromEntries(rooms.map(room => [room.id, room.active ? 'Đang họp' : 'Không xác định'])));
   const setMessage = (vi, en = '', kind = 'error') => { message = vi ? { text: [vi, en || vi], kind } : null; };
   function cleanBlock(b, updates) {
     const next = { ...b, ...updates };
@@ -205,7 +228,7 @@
         {#if config.width}
           <p class="stage-hint">{t('Thu phóng không thay đổi bố cục đã lưu. Khi phóng lớn, cuộn ngang để xem toàn bộ chiều rộng.', 'Zoom does not affect the saved layout. When zoomed in, scroll horizontally to view full width.')}</p>
         {/if}
-        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={device.language || language} data={{ rooms:Object.fromEntries(rooms.map(room => [room.id, { room:room.name, entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}], unavailable:!room.active }])) }} statuses={Object.fromEntries(rooms.map(room => [room.id, room.active ? 'Trống' : 'Không xác định']))} scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} oninspect={(type, point) => openPopover(type, point)} />
+        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={previewLanguage} data={previewData} statuses={previewStatuses} scheduleNow={previewNow} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} oninspect={(type, point) => openPopover(type, point)} />
       </div>
 
       <aside class="inspector">

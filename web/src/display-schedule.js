@@ -3,12 +3,14 @@ export function displaySchedule(entries, now, validUntil = null) {
   let current = sorted.find(entry => entry.starts <= now && entry.ends > now);
   if (current) {
     current = { ...current };
-    // ponytail: merge known busy intervals; a truncated schedule still requires valid_until.
+    let busyUntil = current.ends;
+    // ponytail: merge overlapping conflicts for display end, and track contiguous busy horizon for valid_until.
     for (const entry of sorted) {
-      if (entry.starts > current.ends) break;
-      if (entry.ends > current.ends) current.ends = entry.ends;
+      if (entry.starts > busyUntil) break;
+      if (entry.starts < current.ends && entry.ends > current.ends) current.ends = entry.ends;
+      if (entry.ends > busyUntil) busyUntil = entry.ends;
     }
-    if (validUntil != null && current.ends >= validUntil) current = undefined;
+    if (validUntil != null && busyUntil >= validUntil) current = undefined;
   }
   const upcoming = sorted.filter(entry => entry.starts > now).slice(0, 3);
   return { current, upcoming };

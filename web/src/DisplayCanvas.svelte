@@ -22,6 +22,8 @@
 
   const key = block => block.id || block.type;
   const hasPart = (block, part) => !block.hideParts?.includes(part);
+  const entryTitle = (block, entry) => (!entry || !hasPart(block, 'title')) ? '' : (entry.private ? t('Cuộc họp riêng tư', 'Private meeting') : (entry.title || ''));
+  const entryOrganizer = (block, entry) => (!entry || entry.private || !hasPart(block, 'organizer')) ? '' : (entry.organizer || '');
   const time = (seconds) => new Date(seconds * 1000).toLocaleTimeString(locale, { timeZone: zone, hour: '2-digit', minute: '2-digit' });
   const xMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
   const yMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
@@ -245,32 +247,54 @@
           <strong class="state" class:available={status === 'Trống'} class:busy={status === 'Đang họp'}>{statusText}</strong>
         </div>
         {#if status !== 'Không xác định' && scheduleNow !== null}
-          {#if status === 'Đang họp' && schedule.current && (hasPart(block, 'until') || hasPart(block, 'remaining') || hasPart(block, 'progress'))}
+          {#if status === 'Đang họp' && schedule.current}
+            {@const currentTitle = entryTitle(block, schedule.current)}
+            {@const currentOrganizer = entryOrganizer(block, schedule.current)}
             {@const rem = formatDuration(schedule.current.ends - scheduleNow, language)}
-            <div class="status-meta">
-              {#if hasPart(block, 'until') || (hasPart(block, 'remaining') && rem)}
-                <div class="status-window">
-                  {#if hasPart(block, 'until')}<p class="status-until">{t('Đến', 'Until')} {time(schedule.current.ends)}</p>{/if}
-                  {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
-                </div>
-              {/if}
-              {#if hasPart(block, 'progress')}
-                <div class="status-progress" aria-hidden="true">
-                  <span class="status-progress-fill" style={`width:${Math.round(progress * 100)}%`}></span>
-                </div>
-              {/if}
-            </div>
+            {#if currentTitle || currentOrganizer}
+              <div class="status-booking">
+                {#if currentTitle}
+                  <p class="status-booking-title" class:is-private={schedule.current.private}>{currentTitle}</p>
+                {/if}
+                {#if currentOrganizer}
+                  <p class="status-booking-organizer">
+                    <Icon name="user" class="status-org-icon" />
+                    <span>{currentOrganizer}</span>
+                  </p>
+                {/if}
+              </div>
+            {/if}
+            {#if hasPart(block, 'until') || (hasPart(block, 'remaining') && rem) || hasPart(block, 'progress')}
+              <div class="status-meta">
+                {#if hasPart(block, 'until') || (hasPart(block, 'remaining') && rem)}
+                  <div class="status-window">
+                    {#if hasPart(block, 'until')}<p class="status-until">{t('Đến', 'Until')} {time(schedule.current.ends)}</p>{/if}
+                    {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
+                  </div>
+                {/if}
+                {#if hasPart(block, 'progress')}
+                  <div class="status-progress" aria-hidden="true">
+                    <span class="status-progress-fill" style={`width:${Math.round(progress * 100)}%`}></span>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           {:else if status === 'Trống' && schedule.upcoming.length}
             {@const nextEntry = schedule.upcoming[0]}
-            {@const nextTitle = !hasPart(block, 'title') ? '' : nextEntry.private ? t('Cuộc họp riêng tư', 'Private meeting') : (nextEntry.title || '')}
-            {@const nextOrganizer = nextEntry.private || !hasPart(block, 'organizer') ? '' : (nextEntry.organizer || '')}
+            {@const nextTitle = entryTitle(block, nextEntry)}
+            {@const nextOrganizer = entryOrganizer(block, nextEntry)}
             {@const rem = formatDuration(nextEntry.starts - scheduleNow, language)}
             {#if nextTitle || nextOrganizer}
               <div class="status-booking status-next">
                 <span class="status-booking-kicker">{t('Sắp tới', 'Up next')}</span>
-                {#if nextTitle}<p class="status-booking-title" class:is-private={nextEntry.private}>{nextTitle}</p>{/if}
+                {#if nextTitle}
+                  <p class="status-booking-title" class:is-private={nextEntry.private}>{nextTitle}</p>
+                {/if}
                 {#if nextOrganizer}
-                  <p class="status-booking-organizer"><Icon name="user" class="status-org-icon" /><span>{nextOrganizer}</span></p>
+                  <p class="status-booking-organizer">
+                    <Icon name="user" class="status-org-icon" />
+                    <span>{nextOrganizer}</span>
+                  </p>
                 {/if}
               </div>
             {/if}
@@ -301,6 +325,8 @@
             {#each schedule.upcoming as entry, index}
               {@const untilStart = index === 0 ? formatDuration(entry.starts - scheduleNow, language) : ''}
               {@const slotDuration = formatDuration(entry.ends - entry.starts, language)}
+              {@const itemTitle = entryTitle(block, entry)}
+              {@const itemOrganizer = entryOrganizer(block, entry)}
               <li class="upcoming-item" class:is-next={index === 0}>
                 <div class="upcoming-time-wrap">
                   <span class="upcoming-dot" aria-hidden="true"></span>
@@ -311,6 +337,22 @@
                     {/if}
                   </div>
                 </div>
+                {#if itemTitle || itemOrganizer}
+                  <div class="upcoming-booking">
+                    {#if itemTitle}
+                      <span class="upcoming-title" class:is-private={entry.private}>{itemTitle}</span>
+                    {/if}
+                    {#if itemTitle && itemOrganizer}
+                      <span class="upcoming-sep" aria-hidden="true">·</span>
+                    {/if}
+                    {#if itemOrganizer}
+                      <span class="upcoming-organizer">
+                        {#if !itemTitle}<Icon name="user" class="upcoming-org-icon" />{/if}
+                        <span>{itemOrganizer}</span>
+                      </span>
+                    {/if}
+                  </div>
+                {/if}
                 {#if slotDuration && hasPart(block, 'duration')}<span class="upcoming-duration">{slotDuration}</span>{/if}
               </li>
             {/each}
@@ -419,6 +461,12 @@
   }
   .canvas.fixed .state {
     font-size: calc(clamp(1.5rem, min(10.5cqi, 7cqh), 4.6rem) * var(--w-font-scale, 1));
+  }
+  .canvas.fixed .status-booking-title {
+    font-size: calc(clamp(0.88rem, min(4.2cqi, 3.1cqh), 1.75rem) * var(--w-font-scale, 1));
+  }
+  .canvas.fixed .status-booking-organizer {
+    font-size: calc(clamp(0.72rem, min(2.6cqi, 2cqh), 1.05rem) * var(--w-font-scale, 1));
   }
 
   .canvas {
@@ -780,6 +828,61 @@
     min-width: 0;
     margin-block: auto;
   }
+  .status-main:has(+ .status-booking) {
+    margin-bottom: 0;
+  }
+  .status-booking {
+    display: grid;
+    gap: 0.28rem;
+    min-width: 0;
+    margin-bottom: auto;
+  }
+  .status-booking-kicker {
+    font-size: calc(clamp(0.64rem, 2.2cqi, 0.78rem) * var(--w-font-scale, 1));
+    font-weight: 750;
+    letter-spacing: calc(0.11em + var(--w-ls, 0) * 0.01em);
+    text-transform: uppercase;
+    color: var(--accent, #1b6340);
+  }
+  .status-booking-title {
+    margin: 0;
+    font-size: calc(clamp(0.98rem, 4.4cqi, 1.75rem) * var(--w-font-scale, 1));
+    font-weight: 750;
+    line-height: 1.22;
+    letter-spacing: calc(-0.02em + var(--w-ls, 0) * 0.01em);
+    color: var(--ink-primary, #182c23);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .status-booking-title.is-private {
+    font-style: italic;
+    opacity: 0.85;
+  }
+  .status-booking-organizer {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    font-size: calc(clamp(0.78rem, 2.8cqi, 1.05rem) * var(--w-font-scale, 1));
+    font-weight: 600;
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+    color: var(--ink-secondary, #3b5448);
+  }
+  .status-booking-organizer span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.status-org-icon),
+  :global(.upcoming-org-icon) {
+    width: 0.95em !important;
+    height: 0.95em !important;
+    flex-shrink: 0;
+    opacity: 0.78;
+  }
   :global(.widget-status-icon) {
     width: clamp(1.8rem, 8.5cqi, 3.6rem) !important;
     height: clamp(1.8rem, 8.5cqi, 3.6rem) !important;
@@ -804,13 +907,6 @@
     gap: 0.55rem;
     padding-top: 0.65rem;
     border-top: 1px solid rgba(24, 44, 35, 0.08);
-  }
-  .status-booking-kicker {
-    font-size: calc(clamp(0.64rem, 2.2cqi, 0.78rem) * var(--w-font-scale, 1));
-    font-weight: 750;
-    letter-spacing: calc(0.11em + var(--w-ls, 0) * 0.01em);
-    text-transform: uppercase;
-    color: var(--accent, #1b6340);
   }
   .status-window {
     display: flex;
@@ -896,15 +992,92 @@
     gap: 0.55rem;
   }
   .upcoming-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.65rem;
+    gap: 0.3rem 0.65rem;
     padding: clamp(0.55rem, 2.4cqi, 0.85rem) clamp(0.65rem, 2.6cqi, 0.95rem);
     border-radius: 0.75rem;
     background: var(--bg-subtle, #f4f7f2);
     border: 1px solid var(--border-subtle, #dde4da);
     min-width: 0;
+  }
+  .upcoming-time-wrap {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .upcoming-duration {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .upcoming-booking {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    padding-left: 1.1rem;
+    min-width: 0;
+  }
+  .upcoming-title {
+    font-size: calc(clamp(0.78rem, 3cqi, 0.96rem) * var(--w-font-scale, 1));
+    font-weight: 650;
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+    color: var(--ink-primary, #182c23);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .upcoming-title.is-private {
+    font-style: italic;
+    font-weight: 550;
+    opacity: 0.82;
+  }
+  .upcoming-sep {
+    font-size: 0.78rem;
+    color: var(--ink-muted, #4f665a);
+    opacity: 0.65;
+    flex-shrink: 0;
+  }
+  .upcoming-organizer {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    font-size: calc(clamp(0.72rem, 2.5cqi, 0.86rem) * var(--w-font-scale, 1));
+    font-weight: 500;
+    letter-spacing: calc(var(--w-ls, 0) * 0.01em);
+    color: var(--ink-muted, #4f665a);
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .upcoming-organizer span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  @container (min-width: 440px) {
+    .upcoming-item {
+      grid-template-columns: minmax(clamp(9.5rem, 24cqi, 13rem), auto) minmax(0, 1fr) auto;
+      gap: 0.5rem clamp(0.75rem, 2.2cqi, 1.35rem);
+    }
+    .upcoming-booking {
+      grid-column: 2;
+      grid-row: 1;
+      padding-left: 0;
+    }
+    .upcoming-duration {
+      grid-column: 3;
+      grid-row: 1;
+    }
+    .upcoming-title {
+      font-size: calc(clamp(0.84rem, 2.2cqi, 1.05rem) * var(--w-font-scale, 1));
+    }
+    .upcoming-organizer {
+      font-size: calc(clamp(0.76rem, 1.8cqi, 0.92rem) * var(--w-font-scale, 1));
+    }
   }
   .upcoming-item.is-next {
     background: linear-gradient(135deg, #f3faf5 0%, #e7f3eb 100%);
@@ -975,7 +1148,9 @@
     font-weight: 500;
   }
   @container (max-width: 220px) {
-    .upcoming-duration { display: none; }
+    .upcoming-duration,
+    .upcoming-sep,
+    .upcoming-organizer { display: none; }
   }
 
   /* 6. Footer Connection Widget */
@@ -1046,16 +1221,21 @@
   .block.has-custom-fg.widget-branding strong,
   .block.has-custom-fg.widget-room h1,
   .block.has-custom-fg .state,
+  .block.has-custom-fg .status-booking-title,
   .block.has-custom-fg .status-until,
   .block.has-custom-fg .upcoming-range,
+  .block.has-custom-fg .upcoming-title,
   .block.has-custom-fg .footer-row {
     color: var(--w-fg);
   }
   .block.has-custom-fg .clock-date,
   .block.has-custom-fg .room-eyebrow,
   .block.has-custom-fg .status-booking-kicker,
+  .block.has-custom-fg .status-booking-organizer,
   .block.has-custom-fg .status-note,
   .block.has-custom-fg .kicker,
+  .block.has-custom-fg .upcoming-sep,
+  .block.has-custom-fg .upcoming-organizer,
   .block.has-custom-fg .upcoming-empty,
   .block.has-custom-fg .upcoming-empty-box,
   .block.has-custom-fg .footer-zone {
@@ -1165,6 +1345,16 @@
     width: 100%;
     justify-content: var(--w-items-x, space-between);
   }
+  .block.has-custom-align .status-booking {
+    width: 100%;
+    justify-items: var(--w-items-x, stretch);
+  }
+  .block.has-custom-align .status-booking-organizer {
+    justify-content: var(--w-items-x, flex-start);
+  }
+  .block.has-custom-align .upcoming-booking {
+    justify-content: var(--w-items-x, flex-start);
+  }
   .block.has-custom-align .upcoming-list,
   .block.has-custom-align .status-meta,
   .block.has-custom-align .footer-bar {
@@ -1228,12 +1418,21 @@
   }
   .widget-status.sublayout-reverse .status-top { order: 2; }
   .widget-status.sublayout-compact { gap: 0.4rem; }
+  .widget-status.sublayout-compact .status-booking-title { -webkit-line-clamp: 1; }
   .widget-status.sublayout-compact .status-meta { padding-top: 0.35rem; gap: 0.35rem; }
 
   .widget-upcoming.sublayout-reverse .upcoming-head { order: 2; }
-  .widget-upcoming.sublayout-reverse .upcoming-item { flex-direction: row-reverse; }
+  .widget-upcoming.sublayout-reverse .upcoming-item { grid-template-columns: auto minmax(0, 1fr); }
+  .widget-upcoming.sublayout-reverse .upcoming-duration { grid-column: 1; justify-self: start; }
+  .widget-upcoming.sublayout-reverse .upcoming-time-wrap { grid-column: 2; flex-direction: row-reverse; justify-self: end; text-align: right; }
+  .widget-upcoming.sublayout-reverse .upcoming-booking { padding-left: 0; padding-right: 1.1rem; justify-content: flex-end; }
+  @container (min-width: 440px) {
+    .widget-upcoming.sublayout-reverse .upcoming-item { grid-template-columns: auto minmax(0, 1fr) minmax(clamp(9.5rem, 24cqi, 13rem), auto); }
+    .widget-upcoming.sublayout-reverse .upcoming-booking { grid-column: 2; grid-row: 1; padding-right: 0; }
+    .widget-upcoming.sublayout-reverse .upcoming-time-wrap { grid-column: 3; }
+  }
   .widget-upcoming.sublayout-compact .upcoming-list { gap: 0.35rem; }
-  .widget-upcoming.sublayout-compact .upcoming-item { padding: 0.38rem 0.6rem; }
+  .widget-upcoming.sublayout-compact .upcoming-item { padding: 0.38rem 0.6rem; gap: 0.2rem 0.6rem; }
 
   .widget-footer.sublayout-reverse .footer-bar { flex-direction: row-reverse; }
   .widget-footer.sublayout-compact { padding-block: 0.45rem; }
