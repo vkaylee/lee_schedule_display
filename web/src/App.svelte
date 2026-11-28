@@ -5,7 +5,6 @@
   import Rooms from './Rooms.svelte';
   import Bookings from './Bookings.svelte';
   import Devices from './Devices.svelte';
-  import Kiosk from './Kiosk.svelte';
   import PublicDisplay from './PublicDisplay.svelte';
   const displayMatch = window.location.pathname.match(/^\/display\/([0-9a-f]{32})$/);
 
@@ -241,14 +240,12 @@
     }
   }
 
-  if (window.location.pathname !== '/kiosk' && !displayMatch) onMount(loadSession);
+  if (!displayMatch) onMount(loadSession);
 </script>
 
 <svelte:head><title>{t('Quản lý lịch phòng họp', 'Meeting room schedule management')}</title></svelte:head>
 
-{#if window.location.pathname === '/kiosk'}
-  <Kiosk />
-{:else if displayMatch}
+{#if displayMatch}
   <PublicDisplay id={displayMatch[1]} />
 {:else if !session}
   <main class="ui-auth-page">

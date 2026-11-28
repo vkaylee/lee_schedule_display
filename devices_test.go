@@ -12,43 +12,6 @@ import (
 	"time"
 )
 
-func TestDeviceLanguageMigrationFromVersion6(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO devices(room_id,name,token_hash) VALUES(1,'panel',X'01'); DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE devices DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; ALTER TABLE users DROP COLUMN language; DROP TABLE series_audit; DROP TABLE conflict_alerts; DROP TABLE conflict_scan_status; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version=6"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	var publicID string
-	if err := db.QueryRow("SELECT public_id FROM devices WHERE id=1").Scan(&publicID); err != nil || len(publicID) != 32 {
-		t.Fatalf("migration public id=%q error=%v", publicID, err)
-	}
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	var sameID string
-	if err := db.QueryRow("SELECT public_id FROM devices WHERE id=1").Scan(&sameID); err != nil || sameID != publicID {
-		t.Fatalf("public id changed on repeated migration: %v", err)
-	}
-	var language string
-	var version int
-	if err := db.QueryRow("SELECT language FROM devices WHERE id=1").Scan(&language); err != nil || language != "vi" {
-		t.Fatalf("language=%q error=%v", language, err)
-	}
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 17 {
-		t.Fatalf("version=%d error=%v", version, err)
-	}
-}
-
 func TestKioskScheduleLimitHasSafeHorizon(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -62,8 +25,14 @@ func TestKioskScheduleLimitHasSafeHorizon(t *testing.T) {
 	if _, err := db.Exec("INSERT INTO rooms(name) VALUES('room')"); err != nil {
 		t.Fatal(err)
 	}
-	token := strings.Repeat("a", 43)
-	if _, err := db.Exec("INSERT INTO devices(room_id,name,token_hash) VALUES(1,'panel',?)", tokenHash(token)); err != nil {
+	config := defaultDisplayConfig()
+	for i := range config.Blocks {
+		if config.Blocks[i].ID != "" {
+			config.Blocks[i].RoomID = 1
+		}
+	}
+	raw, _ := json.Marshal(config)
+	if _, err := db.Exec("INSERT INTO devices(name,public_id,display_config) VALUES('panel','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?)", string(raw)); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now().Unix() + 3600
@@ -73,19 +42,16 @@ func TestKioskScheduleLimitHasSafeHorizon(t *testing.T) {
 		}
 	}
 	h := handlerWithAuth(db, "https://example.test", netip.Addr{})
-	r := httptest.NewRequest("GET", "https://example.test/api/kiosk", nil)
-	r.Header.Set("Authorization", "Bearer "+token)
+	r := httptest.NewRequest("GET", "https://example.test/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	var payload struct {
-		Entries []struct {
-			Starts int64 `json:"starts"`
-		} `json:"entries"`
-		ValidUntil *int64 `json:"valid_until"`
+	var result struct {
+		Rooms map[string]publicRoom `json:"rooms"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
+	payload := result.Rooms["1"]
 	if w.Code != http.StatusOK || len(payload.Entries) != 100 || payload.ValidUntil == nil || *payload.ValidUntil != start+12000 {
 		t.Fatalf("status=%d count=%d horizon=%v", w.Code, len(payload.Entries), payload.ValidUntil)
 	}
@@ -133,25 +99,30 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	if w := request("POST", "/api/devices", `{"name":"panel","room_id":1}`, false, ""); w.Code != 401 {
+	if w := request("POST", "/api/devices", `{"name":"panel"}`, false, ""); w.Code != 401 {
 		t.Fatal(w.Code)
 	}
-	w := request("POST", "/api/devices", `{"name":"panel","room_id":1}`, true, "")
+	w := request("POST", "/api/devices", `{"name":"panel"}`, true, "")
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	var result struct {
-		Token string `json:"token"`
+	config := defaultDisplayConfig()
+	for i := range config.Blocks {
+		if config.Blocks[i].ID != "" {
+			config.Blocks[i].RoomID = 1
+		}
 	}
-	if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Token) != 43 {
+	raw, _ := json.Marshal(config)
+	if _, err = db.Exec("UPDATE devices SET display_config=? WHERE id=1", string(raw)); err != nil {
 		t.Fatal(err)
 	}
-	w = request("GET", "/api/kiosk", "", false, result.Token)
-	if w.Code != 200 || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "other room") || strings.Contains(w.Body.String(), "other series") || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, now+100)) {
-		t.Fatal(w.Code, w.Body.String())
+	var publicID string
+	if err = db.QueryRow("SELECT public_id FROM devices WHERE id=1").Scan(&publicID); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(w.Body.String(), `"language":"vi"`) {
-		t.Fatal(w.Body.String())
+	w = request("GET", "/api/display/"+publicID, "", false, "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), "other room") || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, now+100)) {
+		t.Fatal(w.Code, w.Body.String())
 	}
 	if w = request("PUT", "/api/devices/1/language", `{"language":"en"}`, false, ""); w.Code != 401 {
 		t.Fatal(w.Code)
@@ -179,20 +150,20 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if forbidden.Code != 403 {
 		t.Fatal(forbidden.Code)
 	}
-	if w = request("GET", "/api/kiosk", "", false, result.Token); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
+	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w = request("GET", "/api/devices", "", true, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	w = request("GET", "/api/kiosk", "", false, result.Token)
+	w = request("GET", "/api/display/"+publicID, "", false, "")
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("kiosk response may be cached")
 	}
 	if _, err := db.Exec("UPDATE rooms SET active=0 WHERE id=1"); err != nil {
 		t.Fatal(err)
 	}
-	if w = request("GET", "/api/kiosk", "", false, result.Token); w.Code != 401 || strings.Contains(w.Body.String(), "secret") {
+	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"unavailable":true`) || strings.Contains(w.Body.String(), "secret") {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if _, err := db.Exec("UPDATE rooms SET active=1 WHERE id=1"); err != nil {
@@ -201,13 +172,12 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if w = request("POST", "/api/devices/1/revoke", "", true, ""); w.Code != 204 {
 		t.Fatal(w.Code)
 	}
-	if w = request("GET", "/api/kiosk", "", false, result.Token); w.Code != 401 {
+	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
 	if w = request("PUT", "/api/devices/1/language", `{"language":"vi"}`, true, ""); w.Code != 404 {
 		t.Fatal(w.Code)
 	}
-	var publicID string
 	if err := db.QueryRow("SELECT public_id FROM devices WHERE id=1").Scan(&publicID); err != nil || len(publicID) != 32 {
 		t.Fatal("invalid public id", err)
 	}
@@ -231,9 +201,6 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	w = request("POST", "/api/devices/1/reactivate", "", true, "")
 	if w.Code != 204 {
 		t.Fatal(w.Code, w.Body.String())
-	}
-	if w = request("GET", "/api/kiosk", "", false, result.Token); w.Code != 401 {
-		t.Fatal(w.Code)
 	}
 	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 200 {
 		t.Fatal(w.Code)

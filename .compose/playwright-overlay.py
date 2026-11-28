@@ -7,8 +7,7 @@ source = Path('/workspace')
 output = Path('/tmp/ui-overlay')
 output.mkdir()
 replacements = {
-    'main.go': [('if !validOrigin(origin) {', 'if origin != "http://ui-audit:8080" && !validOrigin(origin) {', 1)],
-    'auth.go': [('"__Host-session"', '"dev-session"', 3), ('Secure: true', 'Secure: false', 2)],
+    'main.go': [('if !validOrigin(origin, dev) {', 'if origin != "http://ui-audit:8080" && !validOrigin(origin, dev) {', 1)],
 }
 overlay = {}
 for filename, changes in replacements.items():

@@ -101,13 +101,10 @@ func TestOccurrenceAPIAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("z", 43)
-	device := strings.Repeat("d", 43)
 	if _, err = db.Exec("INSERT INTO sessions VALUES (?,1,'csrf',?)", tokenHash(token), time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(2,'screen',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')", tokenHash(device)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 2, strings.Repeat("a", 32))
 	start := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
 	rule := recurrence.Rule{Start: start, Location: time.UTC, Frequency: recurrence.Daily, Interval: 1, Count: 2, Duration: time.Hour}
 	if err = storeSeries(db, token, "csrf", booking{RoomID: 1, Title: "series", Organizer: "admin"}, rule); err != nil {
@@ -156,13 +153,7 @@ func TestOccurrenceAPIAndRestart(t *testing.T) {
 	if w := request("GET", "/api/series", "", "", true); w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"original_starts":%d`, start.Unix())) || !strings.Contains(w.Body.String(), `"title":"secret override"`) {
 		t.Fatalf("restart list %d %s", w.Code, w.Body.String())
 	}
-	r := httptest.NewRequest("GET", "https://example.test/api/kiosk", nil)
-	r.Header.Set("Authorization", "Bearer "+device)
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, moved)) || strings.Contains(w.Body.String(), "secret") {
-		t.Fatalf("kiosk privacy %d %s", w.Code, w.Body.String())
-	}
 	if w = request("GET", "/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, moved)) || strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("display privacy %d %s", w.Code, w.Body.String())
 	}
@@ -343,16 +334,12 @@ func TestOccurrenceMovesAcrossHorizon(t *testing.T) {
 	if err = storeSeries(db, token, "csrf", booking{RoomID: 1, Title: "s", Organizer: "admin"}, rule); err != nil {
 		t.Fatal(err)
 	}
-	device := strings.Repeat("d", 43)
-	if _, err = db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')", tokenHash(device)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	check := func(want, absent int64) {
 		t.Helper()
 		h := handlerWithAuth(db, "https://example.test", netip.Addr{})
-		for _, endpoint := range []string{"/api/kiosk", "/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		for _, endpoint := range []string{"/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
 			r := httptest.NewRequest("GET", "https://example.test"+endpoint, nil)
-			r.Header.Set("Authorization", "Bearer "+device)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
 			if w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, want)) || strings.Contains(w.Body.String(), fmt.Sprintf(`"starts":%d`, absent)) {
@@ -400,114 +387,7 @@ func TestOccurrenceMovesAcrossHorizon(t *testing.T) {
 	}
 }
 
-func TestMigration11PreservesOccurrencesAndRollsBack(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(fmt.Sprint("failure_", fail), func(t *testing.T) {
-			db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "migration.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			db.SetMaxOpenConns(1)
-			if err = migrate(db); err != nil {
-				t.Fatal(err)
-			}
-			_, err = db.Exec(`DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('room'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series','admin',1,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); PRAGMA user_version=11`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if fail {
-				if _, err = db.Exec("CREATE TABLE occurrence_audit (blocker INTEGER)"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			err = migrate(db)
-			if fail && err == nil || !fail && err != nil {
-				t.Fatalf("migrate %v", err)
-			}
-			var version, count int
-			if err = db.QueryRow("SELECT (SELECT user_version FROM pragma_user_version), COUNT(*) FROM series_occurrences WHERE series_id=1 AND ((starts=100 AND ends=200) OR (starts=300 AND ends=400))").Scan(&version, &count); err != nil || count != 2 {
-				t.Fatalf("data version=%d count=%d err=%v", version, count, err)
-			}
-			if fail {
-				if version != 11 {
-					t.Fatalf("rollback version %d", version)
-				}
-				if _, err = db.Exec("SELECT original_starts FROM series_occurrences"); err == nil {
-					t.Fatal("rollback left new schema")
-				}
-				if _, err = db.Exec("DROP TABLE occurrence_audit"); err != nil {
-					t.Fatal(err)
-				}
-				if err = migrate(db); err != nil {
-					t.Fatal(err)
-				}
-			} else if version != 17 {
-				t.Fatalf("version %d", version)
-			}
-			var originals int
-			if err = db.QueryRow("SELECT COUNT(*) FROM series_occurrences WHERE original_starts=starts AND version=1 AND canceled=0 AND room_id IS NULL").Scan(&originals); err != nil || originals != 2 {
-				t.Fatalf("identities %d %v", originals, err)
-			}
-		})
-	}
-}
-
-func TestOfficialMigrationPreservesPublicID(t *testing.T) {
-	for _, v := range []int{10, 11} {
-		t.Run(fmt.Sprint(v), func(t *testing.T) {
-			db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "official.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			db.SetMaxOpenConns(1)
-			if err = migrate(db); err != nil {
-				t.Fatal(err)
-			}
-			_, err = db.Exec(`DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences(series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',X'01','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'meeting','admin',0,'{}',1); INSERT INTO series_occurrences VALUES(1,100,200); PRAGMA user_version=11`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if v == 10 {
-				if _, err = db.Exec("DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; PRAGMA user_version=10"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err = migrate(db); err != nil {
-				t.Fatal(err)
-			}
-			var id string
-			var version, horizon, original int
-			if err = db.QueryRow("SELECT devices.public_id,(SELECT user_version FROM pragma_user_version),booking_series.checked_through,series_occurrences.original_starts FROM devices,booking_series,series_occurrences").Scan(&id, &version, &horizon, &original); err != nil || len(id) != 32 || version != 17 || horizon != 200 || original != 100 || (v == 11 && id != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
-				t.Fatalf("id=%s version=%d horizon=%d original=%d error=%v", id, version, horizon, original, err)
-			}
-		})
-	}
-}
-func TestRejectExperimentalVersion11(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if err = migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec("DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; PRAGMA user_version=11"); err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate(db); err == nil || !strings.Contains(err.Error(), "unsupported experimental") {
-		t.Fatalf("expected rejection: %v", err)
-	}
-	var version int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 11 {
-		t.Fatalf("version=%d %v", version, err)
-	}
-}
-
-func TestRejectVersion13MissingSchema(t *testing.T) {
+func TestRejectCurrentMissingSchema(t *testing.T) {
 	for _, statement := range []string{"DROP TABLE occurrence_audit", "ALTER TABLE booking_series DROP COLUMN checked_through", "DROP TABLE series_occurrences"} {
 		t.Run(statement, func(t *testing.T) {
 			db, err := sql.Open("sqlite", ":memory:")
@@ -529,7 +409,7 @@ func TestRejectVersion13MissingSchema(t *testing.T) {
 	}
 }
 
-func TestRejectVersion13DamagedSeriesAndIndex(t *testing.T) {
+func TestRejectCurrentDamagedSeriesAndIndex(t *testing.T) {
 	for _, statement := range []string{
 		"DROP TABLE booking_series; CREATE TABLE booking_series(checked_through INTEGER)",
 		"DROP INDEX devices_public_id",
@@ -572,7 +452,7 @@ func TestRejectOccurrenceMissingDefaults(t *testing.T) {
 			if err = db.QueryRow("SELECT sql FROM sqlite_schema WHERE type='table' AND name='series_occurrences'").Scan(&schema); err != nil {
 				t.Fatal(err)
 			}
-			schema = strings.Replace(schema, "CREATE TABLE \"series_occurrences\"", "CREATE TABLE replacement_occurrences", 1)
+			schema = strings.Replace(schema, "CREATE TABLE series_occurrences", "CREATE TABLE replacement_occurrences", 1)
 			schema = strings.Replace(schema, column+" INTEGER NOT NULL DEFAULT "+map[string]string{"version": "1", "canceled": "0"}[column], column+" INTEGER NOT NULL", 1)
 			if _, err = db.Exec(schema); err != nil {
 				t.Fatal(err)

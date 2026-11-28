@@ -17,39 +17,17 @@ type publicRoom struct {
 	Unavailable bool          `json:"unavailable"`
 }
 
-func readDisplayConfig(raw string, roomID int64) (displayConfig, error) {
+func readDisplayConfig(raw string) (displayConfig, error) {
 	c := defaultDisplayConfig()
-	if raw == "" {
-		for i := range c.Blocks {
-			b := &c.Blocks[i]
-			if b.Type == "room" || b.Type == "status" || b.Type == "upcoming" {
-				b.ID, b.RoomID = b.Type, roomID
-			}
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &c); err != nil {
+			return c, err
 		}
-	} else if err := json.Unmarshal([]byte(raw), &c); err != nil {
-		return c, err
 	}
 	if !validDisplayConfig(c) {
 		return c, errors.New("invalid display config")
 	}
 	return c, nil
-}
-
-func legacyDisplayMatches(c displayConfig, roomID int64) bool {
-	if roomID <= 0 {
-		return false
-	}
-	found := false
-	for _, block := range c.Blocks {
-		if block.Type != "room" && block.Type != "status" && block.Type != "upcoming" {
-			continue
-		}
-		if block.RoomID != roomID {
-			return false
-		}
-		found = true
-	}
-	return found
 }
 
 func loadPublicRoom(tx *sql.Tx, roomID, now int64) publicRoom {

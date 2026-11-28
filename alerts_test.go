@@ -455,15 +455,15 @@ func TestNewRoomCreationCoverageBeforeWorkerScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("z", 43)
-	if _, err = db.Exec("INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('new room'); INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'); INSERT INTO sessions VALUES(?,1,'csrf',?)", tokenHash(token), tokenHash(token), now.Add(time.Hour).Unix()); err != nil {
+	if _, err = db.Exec("INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('new room'); INSERT INTO sessions VALUES(?,1,'csrf',?)", tokenHash(token), now.Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	rule := recurrence.Rule{Start: now.Add(time.Hour), Location: time.UTC, Frequency: recurrence.Daily, Interval: 1, Duration: time.Hour}
 	if err = storeSeries(db, token, "csrf", booking{RoomID: 1, Title: "series", Organizer: "admin"}, rule); err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest(http.MethodGet, "https://example.test/api/kiosk", nil)
-	r.Header.Set("Authorization", "Bearer "+token)
+	r := httptest.NewRequest(http.MethodGet, "https://example.test/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
 	w := httptest.NewRecorder()
 	handlerWithAuth(db, "https://example.test", netip.Addr{}).ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"valid_until":`) || strings.Contains(w.Body.String(), `"valid_until":`+fmt.Sprint(now.Unix())) {
@@ -477,7 +477,7 @@ func TestNewRoomCreationCoverageBeforeWorkerScan(t *testing.T) {
 	}
 }
 
-func TestCheckpointESlidingWindowConflictAndKiosk(t *testing.T) {
+func TestCheckpointESlidingWindowConflictAndDisplay(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "checkpoint-e.db")+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
@@ -489,13 +489,10 @@ func TestCheckpointESlidingWindowConflictAndKiosk(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	adminToken := strings.Repeat("a", 43)
-	deviceToken := strings.Repeat("d", 43)
 	if _, err = db.Exec(`INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name) VALUES('Room E')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'kiosk',?,'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')`, tokenHash(deviceToken)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, strings.Repeat("e", 32))
 	if _, err = db.Exec(`INSERT INTO sessions VALUES(?,1,'csrf',?)`, tokenHash(adminToken), now.Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
@@ -506,8 +503,6 @@ func TestCheckpointESlidingWindowConflictAndKiosk(t *testing.T) {
 		r.Header.Set("X-CSRF-Token", "csrf")
 		if auth == "admin" {
 			r.AddCookie(&http.Cookie{Name: "__Host-session", Value: adminToken})
-		} else if auth == "kiosk" {
-			r.Header.Set("Authorization", "Bearer "+deviceToken)
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -544,12 +539,11 @@ func TestCheckpointESlidingWindowConflictAndKiosk(t *testing.T) {
 	if w = req("POST", "/api/alerts/1/acknowledge", "", "admin"); w.Code != 204 {
 		t.Fatalf("acknowledge: %d %s", w.Code, w.Body.String())
 	}
-	// Kiosk still serves Room E accurately (and has valid_until set)
-	if w = req("GET", "/api/kiosk", "", "kiosk"); w.Code != 200 || !strings.Contains(w.Body.String(), `"valid_until":`) {
+	// The public display still serves Room E with a coverage horizon.
+	if w = req("GET", "/api/display/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"valid_until":`) {
 		t.Fatalf("kiosk after scan: %d %s", w.Code, w.Body.String())
 	}
 }
-
 
 func TestRoomScanFailureDoesNotInvalidateOtherRoomCoverage(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")

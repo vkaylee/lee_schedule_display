@@ -58,7 +58,7 @@
     <div>
       <p class="section-kicker">{t('DANH MỤC PHÒNG HỌP', 'MEETING SPACES')}</p>
       <h2 id="rooms-heading">{t('Quản lý phòng', 'Room management')}</h2>
-      <p>{t('Thiết lập phòng họp và chính sách hiển thị thông tin trên màn hình.', 'Configure meeting rooms and public display privacy policies.')}</p>
+      <p>{t('Thiết lập và quản lý phòng họp.', 'Configure and manage meeting rooms.')}</p>
     </div>
   </div>
 
@@ -88,14 +88,6 @@
                     {room.active ? t('Đang hoạt động', 'Active') : t('Đã vô hiệu hóa', 'Disabled')}
                   </span>
                 </div>
-                <div class="room-meta">
-                  <span class="meta-tag" class:meta-tag--on={room.show_title}>
-                    {room.show_title ? t('Hiện tiêu đề', 'Title visible') : t('Ẩn tiêu đề', 'Title hidden')}
-                  </span>
-                  <span class="meta-tag" class:meta-tag--on={room.show_organizer}>
-                    {room.show_organizer ? t('Hiện người tổ chức', 'Organizer visible') : t('Ẩn người tổ chức', 'Organizer hidden')}
-                  </span>
-                </div>
               </div>
               <button class="secondary" type="button" disabled={busy} aria-label={`${t('Sửa phòng', 'Edit room')} ${room.name}`} onclick={() => edit(room)}>
                 <Icon name="edit" />
@@ -123,21 +115,7 @@
           </label>
         {/if}
 
-        <label class="toggle-row">
-          <input type="checkbox" bind:checked={showTitle} />
-          <span>
-            <strong>{t('Hiển thị tiêu đề trên màn hình', 'Show title on display')}</strong>
-            <small>{t('Cho phép hiện tên cuộc họp trên kiosk và màn hình công khai.', 'Allow meeting titles to appear on kiosks and public displays.')}</small>
-          </span>
-        </label>
-
-        <label class="toggle-row">
-          <input type="checkbox" bind:checked={showOrganizer} />
-          <span>
-            <strong>{t('Hiển thị người tổ chức trên màn hình', 'Show organizer on display')}</strong>
-            <small>{t('Cho phép hiện tên người đặt lịch trên kiosk.', 'Allow organizer names to appear on room kiosks.')}</small>
-          </span>
-        </label>
+        <p>{t('Màn hình công khai chỉ hiển thị thời gian, không hiển thị tiêu đề hoặc người tổ chức.', 'Public displays show times only, never titles or organizers.')}</p>
 
         <div class="ui-form-actions">
           <button type="submit" disabled={busy}>{t('Lưu phòng', 'Save room')}</button>
@@ -175,30 +153,6 @@
   .room-title-row strong {
     font-size: 1.02rem;
     color: var(--ink-primary);
-  }
-
-  .room-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-  }
-
-  .meta-tag {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.15rem 0.55rem;
-    border-radius: var(--radius-sm);
-    font-size: 0.78rem;
-    font-weight: 500;
-    background: var(--bg-subtle);
-    color: var(--ink-muted);
-    border: 1px solid var(--border-subtle);
-  }
-
-  .meta-tag--on {
-    background: #eef6f0;
-    color: #195637;
-    border-color: #cde2d3;
   }
 
   .toggle-row {

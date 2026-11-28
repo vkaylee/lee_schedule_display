@@ -55,7 +55,7 @@ func doSeriesReq(t *testing.T, h http.Handler, method, path, token, csrf string,
 	return rec
 }
 
-func TestSeriesMigrationVersion16(t *testing.T) {
+func TestCurrentSeriesSchema(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestSeriesMigrationVersion16(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 17 {
+	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 19 {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	for _, stmt := range []string{
@@ -96,11 +96,8 @@ func TestSeriesMigrationVersion16(t *testing.T) {
 
 func TestCanceledSeriesExcludedEverywhere(t *testing.T) {
 	db, h, token, csrf := setupSeriesScopeTest(t, time.UTC)
-	deviceToken := strings.Repeat("d", 43)
 	pubID := strings.Repeat("a", 32)
-	if _, err := db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'kiosk',?,?)", tokenHash(deviceToken), pubID); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, pubID)
 	start := time.Now().UTC().Truncate(time.Second).Add(2 * time.Hour)
 	// Unbounded series on Room 1
 	rec := doSeriesReq(t, h, "POST", "/api/series", token, csrf, map[string]any{
@@ -149,30 +146,16 @@ func TestCanceledSeriesExcludedEverywhere(t *testing.T) {
 	if _, err := db.Exec("DELETE FROM bookings"); err != nil {
 		t.Fatal(err)
 	}
-	kioskReq := httptest.NewRequest("GET", "/api/kiosk", nil)
-	kioskReq.Header.Set("Authorization", "Bearer "+deviceToken)
-	kioskRec := httptest.NewRecorder()
-	h.ServeHTTP(kioskRec, kioskReq)
-	if kioskRec.Code != 200 {
-		t.Fatalf("kiosk: %d", kioskRec.Code)
-	}
-	var kioskPayload struct {
-		Bookings   []any  `json:"bookings"`
-		ValidUntil *int64 `json:"valid_until"`
-	}
-	if err := json.Unmarshal(kioskRec.Body.Bytes(), &kioskPayload); err != nil || len(kioskPayload.Bookings) != 0 || kioskPayload.ValidUntil != nil {
-		t.Fatalf("unexpected kiosk payload after cancel: %s (%v)", kioskRec.Body.String(), err)
-	}
+
 	dispRec := httptest.NewRecorder()
 	h.ServeHTTP(dispRec, httptest.NewRequest("GET", "/api/display/"+pubID, nil))
 	if dispRec.Code != 200 {
 		t.Fatalf("display: %d", dispRec.Code)
 	}
 	var dispPayload struct {
-		Bookings   []any  `json:"bookings"`
-		ValidUntil *int64 `json:"valid_until"`
+		Rooms map[string]publicRoom `json:"rooms"`
 	}
-	if err := json.Unmarshal(dispRec.Body.Bytes(), &dispPayload); err != nil || len(dispPayload.Bookings) != 0 || dispPayload.ValidUntil != nil {
+	if err := json.Unmarshal(dispRec.Body.Bytes(), &dispPayload); err != nil || len(dispPayload.Rooms["1"].Entries) != 0 || dispPayload.Rooms["1"].ValidUntil != nil {
 		t.Fatalf("unexpected display payload after cancel: %s (%v)", dispRec.Body.String(), err)
 	}
 	// Re-run conflict scan: alerts deactivated and no materialization coverage remains

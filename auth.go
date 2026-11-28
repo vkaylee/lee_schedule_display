@@ -33,137 +33,44 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 17 {
-		return errors.New("unsupported database version")
+	if version != 0 && version != 19 {
+		return errors.New("unsupported database version: create a new empty database")
 	}
 	if version == 0 {
-		_, err = tx.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL);
+		var objects int
+		if err := tx.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'`).Scan(&objects); err != nil {
+			return err
+		}
+		if objects != 0 {
+			return errors.New("database is not empty: create a new empty database")
+		}
+		if _, err := tx.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en')));
 CREATE TABLE sessions (token_hash BLOB PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires INTEGER NOT NULL);
-PRAGMA user_version = 1`)
-		if err != nil {
-			return err
-		}
-	}
-	if version <= 1 {
-		if _, err := tx.Exec(`ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1));
 CREATE TABLE account_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, target_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-PRAGMA user_version = 2`); err != nil {
-			return err
-		}
-	}
-	if version <= 2 {
-		if _, err := tx.Exec(`CREATE TABLE rooms (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), show_title INTEGER NOT NULL DEFAULT 0 CHECK (show_title IN (0,1)), show_organizer INTEGER NOT NULL DEFAULT 0 CHECK (show_organizer IN (0,1)));
-PRAGMA user_version = 3`); err != nil {
-			return err
-		}
-	}
-	if version <= 3 {
-		if _, err := tx.Exec(`CREATE TABLE bookings (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)));
+CREATE TABLE rooms (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), show_title INTEGER NOT NULL DEFAULT 0 CHECK (show_title IN (0,1)), show_organizer INTEGER NOT NULL DEFAULT 0 CHECK (show_organizer IN (0,1)));
+CREATE TABLE bookings (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), version INTEGER NOT NULL DEFAULT 1);
 CREATE INDEX bookings_room_time ON bookings(room_id, starts, ends) WHERE canceled = 0;
 CREATE TABLE booking_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, booking_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-PRAGMA user_version = 4`); err != nil {
-			return err
-		}
-	}
-	if version <= 4 {
-		if _, err := tx.Exec(`CREATE TABLE devices (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), name TEXT NOT NULL, token_hash BLOB NOT NULL UNIQUE, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), last_seen INTEGER);
-PRAGMA user_version = 5`); err != nil {
-			return err
-		}
-	}
-	if version <= 5 {
-		if _, err := tx.Exec(`ALTER TABLE bookings ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-PRAGMA user_version = 6`); err != nil {
-			return err
-		}
-	}
-	if version <= 6 {
-		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
-PRAGMA user_version = 7`); err != nil {
-			return err
-		}
-	}
-	if version <= 7 {
-		if _, err := tx.Exec(`ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en'));
-PRAGMA user_version = 8`); err != nil {
-			return err
-		}
-	}
-	if version <= 8 {
-		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN display_config TEXT NOT NULL DEFAULT '';
-PRAGMA user_version = 9`); err != nil {
-			return err
-		}
-	}
-	if version <= 9 {
-		if _, err := tx.Exec(`CREATE TABLE booking_series (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), rule TEXT NOT NULL, actor_id INTEGER NOT NULL REFERENCES users(id));
-CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), PRIMARY KEY(series_id, starts));
-CREATE INDEX series_occurrences_time ON series_occurrences(starts, ends);
-PRAGMA user_version = 10`); err != nil {
-			return err
-		}
-	}
-	if version <= 10 {
-		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN public_id TEXT NOT NULL DEFAULT '';
-UPDATE devices SET public_id=lower(hex(randomblob(16))) WHERE public_id='';
+CREATE TABLE devices (id INTEGER PRIMARY KEY, name TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en')), display_config TEXT NOT NULL DEFAULT '', public_id TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX devices_public_id ON devices(public_id) WHERE public_id<>'';
-PRAGMA user_version=11`); err != nil {
-			return err
-		}
-	}
-	if version >= 11 {
-		var hasPublicID int
-		if err := tx.QueryRow("SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='public_id'").Scan(&hasPublicID); err != nil {
-			return err
-		}
-		if hasPublicID != 1 {
-			return errors.New("unsupported experimental database schema")
-		}
-	}
-	if version <= 11 {
-		if _, err := tx.Exec(`ALTER TABLE booking_series ADD COLUMN checked_through INTEGER;
-UPDATE booking_series SET checked_through=(SELECT MAX(ends) FROM series_occurrences WHERE series_id=booking_series.id);
-PRAGMA user_version=12`); err != nil {
-			return err
-		}
-	}
-	if version <= 12 {
-		if _, err := tx.Exec(`CREATE TABLE new_series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), original_starts INTEGER NOT NULL, starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), room_id INTEGER REFERENCES rooms(id), title TEXT, organizer TEXT, private INTEGER CHECK(private IN (0,1)), PRIMARY KEY(series_id,original_starts));
-INSERT INTO new_series_occurrences(series_id,original_starts,starts,ends) SELECT series_id,starts,starts,ends FROM series_occurrences;
-DROP TABLE series_occurrences;
-ALTER TABLE new_series_occurrences RENAME TO series_occurrences;
+CREATE TABLE booking_series (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), rule TEXT NOT NULL, actor_id INTEGER NOT NULL REFERENCES users(id), checked_through INTEGER, version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)));
+CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), original_starts INTEGER NOT NULL, starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), room_id INTEGER REFERENCES rooms(id), title TEXT, organizer TEXT, private INTEGER CHECK(private IN (0,1)), PRIMARY KEY(series_id,original_starts));
 CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends);
 CREATE TABLE occurrence_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, original_starts INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-PRAGMA user_version = 13`); err != nil {
-			return err
-		}
-	}
-	if version <= 13 {
-		if _, err := tx.Exec(`CREATE TABLE conflict_alerts (id INTEGER PRIMARY KEY, series_a INTEGER NOT NULL, original_a INTEGER NOT NULL, series_b INTEGER NOT NULL, original_b INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)), acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)), UNIQUE(series_a,original_a,series_b,original_b)); CREATE TABLE conflict_scan_status(id INTEGER PRIMARY KEY CHECK(id=1),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1))); INSERT INTO conflict_scan_status(id) VALUES(1); CREATE TABLE room_scan_status(room_id INTEGER PRIMARY KEY REFERENCES rooms(id),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1))); INSERT INTO room_scan_status(room_id) SELECT id FROM rooms; PRAGMA user_version=14`); err != nil {
-			return err
-		}
-	}
-	if version <= 14 {
-		if _, err := tx.Exec(`CREATE TABLE materialization_coverage(series_id INTEGER PRIMARY KEY REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts)); PRAGMA user_version=15`); err != nil {
-			return err
-		}
-	}
-	if version <= 15 {
-		if _, err := tx.Exec(`ALTER TABLE booking_series ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE booking_series ADD COLUMN canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1));
+CREATE TABLE conflict_alerts (id INTEGER PRIMARY KEY, series_a INTEGER NOT NULL, original_a INTEGER NOT NULL, series_b INTEGER NOT NULL, original_b INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)), acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)), UNIQUE(series_a,original_a,series_b,original_b));
+CREATE TABLE conflict_scan_status(id INTEGER PRIMARY KEY CHECK(id=1),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1)));
+INSERT INTO conflict_scan_status(id) VALUES(1);
+CREATE TABLE room_scan_status(room_id INTEGER PRIMARY KEY REFERENCES rooms(id),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1)));
+CREATE TABLE materialization_coverage(series_id INTEGER PRIMARY KEY REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts));
 CREATE TABLE series_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-PRAGMA user_version = 16`); err != nil {
-			return err
-		}
-	}
-	if version <= 16 {
-		if err := migrateDisplayRooms(tx); err != nil {
+PRAGMA user_version=19`); err != nil {
 			return err
 		}
 	}
 	var compatible bool
 	if err := tx.QueryRow(`SELECT
-(SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='public_id')=1 AND
+(SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name IN ('id','name','revoked','language','display_config','public_id'))=6 AND
+(SELECT COUNT(*) FROM pragma_table_info('devices'))=6 AND
 (SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name IN ('id','room_id','title','organizer','private','rule','actor_id','checked_through','version','canceled'))=10 AND
 (SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE name='id' AND pk=1)=1 AND
 (SELECT COUNT(*) FROM pragma_table_info('booking_series') WHERE (name='version' AND dflt_value='1' AND "notnull"=1) OR (name='canceled' AND dflt_value='0' AND "notnull"=1))=2 AND

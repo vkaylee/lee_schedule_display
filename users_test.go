@@ -13,37 +13,6 @@ import (
 	"time"
 )
 
-func TestAccountLanguageMigration(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; ALTER TABLE users DROP COLUMN language; ALTER TABLE devices DROP COLUMN display_config; DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; DROP TABLE booking_series; PRAGMA user_version = 7;
-INSERT INTO users(username,salt,password_hash) VALUES('existing',X'01',X'02');
-INSERT INTO rooms(name) VALUES('room');
-INSERT INTO devices(room_id,name,token_hash,language) VALUES(1,'device',X'03','en')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	var accountLanguage, deviceLanguage string
-	if err := db.QueryRow(`SELECT users.language, devices.language FROM users, devices`).Scan(&accountLanguage, &deviceLanguage); err != nil {
-		t.Fatal(err)
-	}
-	if accountLanguage != "vi" || deviceLanguage != "en" {
-		t.Fatalf("languages: %q %q", accountLanguage, deviceLanguage)
-	}
-	if _, err := db.Exec(`UPDATE users SET language = 'fr'`); err == nil {
-		t.Fatal("invalid language accepted")
-	}
-}
-
 func TestUserManagement(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -196,30 +165,5 @@ func TestConcurrentDisablePreservesLastAccount(t *testing.T) {
 	var active int
 	if err := db.QueryRow("SELECT COUNT(*) FROM users WHERE active = 1").Scan(&active); err != nil || active != 1 || success != 1 {
 		t.Fatalf("active=%d success=%d err=%v", active, success, err)
-	}
-}
-
-func TestMigrationFromVersionOne(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL);
-CREATE TABLE sessions (token_hash BLOB PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires INTEGER NOT NULL);
-INSERT INTO users VALUES (1, 'admin', X'01', X'02'); PRAGMA user_version = 1`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	var active bool
-	if err := db.QueryRow("SELECT active FROM users WHERE id = 1").Scan(&active); err != nil || !active {
-		t.Fatalf("active=%v err=%v", active, err)
 	}
 }

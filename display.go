@@ -171,8 +171,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		var raw string
-		var roomID sql.NullInt64
-		err = db.QueryRow("SELECT display_config,room_id FROM devices WHERE id=? AND revoked=0", id).Scan(&raw, &roomID)
+		err = db.QueryRow("SELECT display_config FROM devices WHERE id=? AND revoked=0", id).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -181,7 +180,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
-		c, err := readDisplayConfig(raw, roomID.Int64)
+		c, err := readDisplayConfig(raw)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -232,8 +231,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		var previousRaw string
-		var previousRoom sql.NullInt64
-		err = tx.QueryRow("SELECT display_config,room_id FROM devices WHERE id=? AND revoked=0", id).Scan(&previousRaw, &previousRoom)
+		err = tx.QueryRow("SELECT display_config FROM devices WHERE id=? AND revoked=0", id).Scan(&previousRaw)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -242,7 +240,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
-		previous, err := readDisplayConfig(previousRaw, previousRoom.Int64)
+		previous, err := readDisplayConfig(previousRaw)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -303,8 +301,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 		}
 		defer tx.Rollback()
 		var raw, language string
-		var legacyRoom sql.NullInt64
-		err = tx.QueryRow("SELECT display_config,language,room_id FROM devices WHERE public_id=? AND revoked=0", value).Scan(&raw, &language, &legacyRoom)
+		err = tx.QueryRow("SELECT display_config,language FROM devices WHERE public_id=? AND revoked=0", value).Scan(&raw, &language)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -313,7 +310,7 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
-		c, err := readDisplayConfig(raw, legacyRoom.Int64)
+		c, err := readDisplayConfig(raw)
 		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
@@ -330,25 +327,16 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			}
 			rooms[key] = loadPublicRoom(tx, block.RoomID, now)
 		}
-		legacy := publicRoom{Entries: []publicEntry{}, ValidUntil: &now, Unavailable: true}
-		if legacyRoom.Valid && legacyDisplayMatches(c, legacyRoom.Int64) {
-			if room, ok := rooms[strconv.FormatInt(legacyRoom.Int64, 10)]; ok && !room.Unavailable {
-				legacy = room
-			}
-		}
 		if err = tx.Commit(); err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
-			Config     displayConfig         `json:"config"`
-			Language   string                `json:"language"`
-			Now        int64                 `json:"now"`
-			Rooms      map[string]publicRoom `json:"rooms"`
-			Room       string                `json:"room"`
-			Entries    []publicEntry         `json:"entries"`
-			ValidUntil *int64                `json:"valid_until"`
-		}{c, language, now, rooms, legacy.Room, legacy.Entries, legacy.ValidUntil})
+			Config   displayConfig         `json:"config"`
+			Language string                `json:"language"`
+			Now      int64                 `json:"now"`
+			Rooms    map[string]publicRoom `json:"rooms"`
+		}{c, language, now, rooms})
 	})
 }

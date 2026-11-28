@@ -111,7 +111,7 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	}
 	now := time.Now().Unix()
 	token := strings.Repeat("a", 43)
-	if _, err := db.Exec(`INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name,show_title,show_organizer) VALUES('Room',1,1); INSERT INTO devices(room_id,name,token_hash) VALUES(1,'panel',X'01');`); err != nil {
+	if _, err := db.Exec(`INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO rooms(name,show_title,show_organizer) VALUES('Room',1,1); INSERT INTO devices(name) VALUES('panel');`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO sessions(token_hash,user_id,csrf,expires) VALUES(?,1,'csrf',?)`, tokenHash(token), now+3600); err != nil {
@@ -121,6 +121,16 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'series secret','series organizer',1,'{}',1); INSERT INTO series_occurrences(series_id,original_starts,starts,ends) VALUES(1,?,?,?)`, now+700, now+700, now+800); err != nil {
+		t.Fatal(err)
+	}
+	initial := defaultDisplayConfig()
+	for i := range initial.Blocks {
+		if initial.Blocks[i].ID != "" {
+			initial.Blocks[i].RoomID = 1
+		}
+	}
+	initialRaw, _ := json.Marshal(initial)
+	if _, err := db.Exec(`UPDATE devices SET display_config=? WHERE id=1`, string(initialRaw)); err != nil {
 		t.Fatal(err)
 	}
 	publicID := strings.Repeat("a", 32)
@@ -168,7 +178,7 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &loaded) != nil || len(loaded.Blocks) != len(config.Blocks) || loaded.Blocks[len(loaded.Blocks)-1].Text != "<b>hello</b>" || loaded.Blocks[len(loaded.Blocks)-2].Color != "#123456" {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if _, err := db.Exec(`INSERT INTO devices(room_id,name,token_hash) VALUES(1,'second',X'02')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO devices(name) VALUES('second')`); err != nil {
 		t.Fatal(err)
 	}
 	if w = request("GET", "/api/devices/2/display", "", true); w.Code != 200 || strings.Contains(w.Body.String(), `"width"`) {

@@ -6,7 +6,7 @@
   let editing = $state(null);
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
-  let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), token = $state(''), copied = $state(false), error = $state(''), busy = $state(false);
+  let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), error = $state(''), busy = $state(false);
   async function load() {
     error = '';
     try {
@@ -17,21 +17,13 @@
     finally { loading = false; }
   }
   async function create(event) {
-    event.preventDefault(); busy = true; error = ''; token = ''; copied = false;
+    event.preventDefault(); busy = true; error = '';
     try {
       const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
       if (!response.ok) throw new Error();
-      token = (await response.json()).token; name = ''; await load();
+      name = ''; await load();
     } catch { error = ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
-  }
-  async function copyToken() {
-    try {
-      await navigator.clipboard?.writeText(token);
-      copied = true;
-    } catch {
-      copied = false;
-    }
   }
   async function setLanguage(device, event) {
     const select = event.currentTarget, language = select.value;
@@ -81,24 +73,6 @@
 
   {#if error}<Banner kind="error" text={t(...error)} />{/if}
 
-  {#if token}
-    <div class="token-callout">
-      <p class="token-title" role="status">
-        <Icon name="lock" />
-        <span>{t('Mã thiết bị chỉ hiển thị một lần. Nhập mã trên màn hình phòng:', 'The device token is shown only once. Enter it on the room display:')}</span>
-      </p>
-      <div class="token-row">
-        <output class="token-output" aria-label={t('Mã thiết bị', 'Device token')}>{token}</output>
-        <div class="token-actions">
-          <button class="secondary" type="button" onclick={copyToken}>
-            {copied ? t('Đã sao chép', 'Copied') : t('Sao chép', 'Copy')}
-          </button>
-          <button class="secondary" type="button" onclick={() => { token = ''; copied = false; }}>{t('Ẩn mã', 'Hide token')}</button>
-        </div>
-      </div>
-    </div>
-  {/if}
-
   {#if editing}
     <DisplayEditor device={editing} {rooms} {csrf} {language} onclose={() => editing = null} />
   {/if}
@@ -113,7 +87,7 @@
       {:else if devices.length === 0}
         <div class="ui-empty">
           <strong>{t('Chưa có thiết bị nào.', 'No devices registered yet.')}</strong>
-          <p>{t('Đăng ký thiết bị mới để lấy mã ghép cho kiosk hoặc màn hình công khai.', 'Register a device to get a pairing code or public display URL.')}</p>
+          <p>{t('Đăng ký thiết bị để tạo màn hình công khai.', 'Register a device to create a public display.')}</p>
         </div>
       {:else}
         <ul class="ui-card-list">
@@ -126,10 +100,6 @@
                     {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')}
                   </span>
                 </div>
-                <p class="device-seen">
-                  <Icon name="clock" />
-                  <span>{device.last_seen ? new Date(device.last_seen * 1000).toLocaleString(language === 'en' ? 'en-US' : 'vi-VN') : t('Chưa kết nối', 'Not connected')}</span>
-                </p>
               </div>
 
               <div class="device-controls">
@@ -179,51 +149,6 @@
 </section>
 
 <style>
-  .token-callout {
-    margin-top: 1.25rem;
-    padding: 1.1rem 1.25rem;
-    border: 1px solid var(--accent-border);
-    border-left: 4px solid var(--accent);
-    border-radius: var(--radius-md);
-    background: var(--accent-soft);
-  }
-
-  .token-title {
-    margin: 0 0 0.75rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-weight: 650;
-    color: #134e31;
-  }
-
-  .token-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .token-output {
-    flex: 1 1 16rem;
-    padding: 0.7rem 0.9rem;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--accent-border);
-    background: #ffffff;
-    font-family: var(--font-mono);
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: var(--ink-primary);
-    overflow-wrap: anywhere;
-    user-select: all;
-  }
-
-  .token-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
   .device-card {
     display: grid;
     gap: 0.9rem;
@@ -244,16 +169,6 @@
   .device-title-row strong {
     font-size: 1.05rem;
     color: var(--ink-primary);
-  }
-
-  .device-seen {
-    margin: 0.4rem 0 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--ink-muted);
-    font-variant-numeric: tabular-nums;
   }
 
   .device-controls {

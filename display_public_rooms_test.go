@@ -29,7 +29,7 @@ func TestPublicDisplayPerRoomPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().Unix()
-	_, err = db.Exec(`INSERT INTO rooms(id,name,active) VALUES(1,'available',1),(2,'inactive',0); INSERT INTO devices(name,token_hash,public_id,display_config) VALUES('panel',X'01','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?)`, string(raw))
+	_, err = db.Exec(`INSERT INTO rooms(id,name,active) VALUES(1,'available',1),(2,'inactive',0); INSERT INTO devices(name,public_id,display_config) VALUES('panel','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',?)`, string(raw))
 	if err != nil {
 		t.Fatal(err)
 	}

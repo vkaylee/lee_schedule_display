@@ -28,9 +28,10 @@ func TestFarSeriesDisplayAndPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("s", 43)
-	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',X'01','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')"); err != nil {
+	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02')"); err != nil {
 		t.Fatal(err)
 	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	if _, err = db.Exec("INSERT INTO sessions VALUES (?,1,'csrf',?)", tokenHash(token), time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
@@ -260,31 +261,6 @@ func TestSeriesHorizonBoundaries(t *testing.T) {
 				t.Fatalf("conflict=%v error=%v", tc.conflict, err)
 			}
 		})
-	}
-}
-
-func TestSeriesMigrationVersion10(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	if err = migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(`INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02'); INSERT INTO booking_series(room_id,title,organizer,private,rule,actor_id) VALUES(1,'old','admin',0,'{}',1); DROP TABLE series_audit; DROP TABLE room_scan_status; DROP TABLE materialization_coverage; DROP TABLE conflict_scan_status; DROP TABLE conflict_alerts; DROP TABLE occurrence_audit; DROP TABLE series_occurrences; CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), PRIMARY KEY(series_id,starts)); CREATE INDEX series_occurrences_time ON series_occurrences(starts,ends); INSERT INTO series_occurrences VALUES(1,100,200),(1,300,400); ALTER TABLE booking_series DROP COLUMN canceled; ALTER TABLE booking_series DROP COLUMN version; ALTER TABLE booking_series DROP COLUMN checked_through; DROP INDEX devices_public_id; ALTER TABLE devices DROP COLUMN public_id; PRAGMA user_version=10`); err != nil {
-		t.Fatal(err)
-	}
-	if err = migrate(db); err != nil {
-		t.Fatal(err)
-	}
-	var horizon, count, version int
-	if err = db.QueryRow("SELECT checked_through,(SELECT COUNT(*) FROM series_occurrences), (SELECT user_version FROM pragma_user_version) FROM booking_series WHERE id=1").Scan(&horizon, &count, &version); err != nil || horizon != 400 || count != 2 || version != 17 {
-		t.Fatalf("migration horizon=%d count=%d version=%d err=%v", horizon, count, version, err)
-	}
-	if err = migrate(db); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -528,13 +504,10 @@ func TestUnboundedDisplayRequiresCoverage(t *testing.T) {
 	if err = migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	token := strings.Repeat("d", 43)
 	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02')"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')", tokenHash(token)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	now := time.Now().UTC().Truncate(time.Second)
 	rule := recurrence.Rule{Start: now.Add(-time.Hour), Location: time.UTC, Frequency: recurrence.Daily, Interval: 1, Duration: time.Minute}
 	raw, err := json.Marshal(storedSeriesRule{rule, "UTC"})
@@ -545,12 +518,11 @@ func TestUnboundedDisplayRequiresCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := handlerWithAuth(db, "https://example.test", netip.Addr{})
-	for _, endpoint := range []string{"/api/kiosk", "/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+	for _, endpoint := range []string{"/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
 		r := httptest.NewRequest("GET", "https://example.test"+endpoint, nil)
-		r.Header.Set("Authorization", "Bearer "+token)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		if w.Code == 200 && !strings.Contains(w.Body.String(), fmt.Sprintf(`"valid_until":%d`, now.Unix())) {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"valid_until":%d`, now.Unix())) {
 			t.Fatalf("uncovered display %s %d %s", endpoint, w.Code, w.Body.String())
 		}
 	}
@@ -845,13 +817,9 @@ func TestDisplayCoverageIsScopedToRoomAndMovedExceptions(t *testing.T) {
 	if _, err = db.Exec("UPDATE conflict_scan_status SET last_success=?,checked_from=?,checked_through=? WHERE id=1; INSERT INTO room_scan_status(room_id,last_success,checked_from,checked_through) VALUES(1,?,?,?)", now.Unix(), now.Unix()-10, now.Unix()+3600, now.Unix(), now.Unix()-10, now.Unix()+3600); err != nil {
 		t.Fatal(err)
 	}
-	token := strings.Repeat("d", 43)
-	if _, err = db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')", tokenHash(token)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	get := func() string {
-		r := httptest.NewRequest("GET", "https://example.test/api/kiosk", nil)
-		r.Header.Set("Authorization", "Bearer "+token)
+		r := httptest.NewRequest("GET", "https://example.test/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
 		w := httptest.NewRecorder()
 		handlerWithAuth(db, "https://example.test", netip.Addr{}).ServeHTTP(w, r)
 		if w.Code != 200 {
@@ -957,7 +925,7 @@ func TestMovedExceptionFromOtherRoomBlocksBooking(t *testing.T) {
 	}
 }
 
-func TestFutureUnboundedKioskCoverageRoomScoped(t *testing.T) {
+func TestFutureUnboundedDisplayCoverageRoomScoped(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "future-kiosk.db")+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
@@ -969,10 +937,7 @@ func TestFutureUnboundedKioskCoverageRoomScoped(t *testing.T) {
 	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('one'),('two'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02')"); err != nil {
 		t.Fatal(err)
 	}
-	token := strings.Repeat("d", 43)
-	if _, err = db.Exec("INSERT INTO devices(room_id,name,token_hash,public_id) VALUES(1,'panel',?,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')", tokenHash(token)); err != nil {
-		t.Fatal(err)
-	}
+	insertTestDisplay(t, db, 1, strings.Repeat("a", 32))
 	now := time.Now().UTC().Truncate(time.Second)
 	future := now.AddDate(0, 6, 0)
 	rule := recurrence.Rule{Start: future, Location: time.UTC, Frequency: recurrence.Daily, Interval: 1, Duration: time.Hour}
@@ -989,8 +954,7 @@ func TestFutureUnboundedKioskCoverageRoomScoped(t *testing.T) {
 	if _, err = db.Exec("UPDATE conflict_scan_status SET last_success=?,checked_from=?,checked_through=? WHERE id=1; INSERT INTO room_scan_status(room_id,last_success,checked_from,checked_through) VALUES(1,?,?,?)", now.Unix(), now.Unix()-10, now.AddDate(1, 0, 0).Unix(), now.Unix(), now.Unix()-10, now.AddDate(1, 0, 0).Unix()); err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("GET", "https://example.test/api/kiosk", nil)
-	r.Header.Set("Authorization", "Bearer "+token)
+	r := httptest.NewRequest("GET", "https://example.test/api/display/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil)
 	w := httptest.NewRecorder()
 	handlerWithAuth(db, "https://example.test", netip.Addr{}).ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), fmt.Sprintf(`"valid_until":%d`, future.Unix())) {
