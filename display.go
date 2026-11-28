@@ -111,7 +111,7 @@ func validDisplayConfig(c displayConfig) bool {
 			}
 			if a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Margin != 0 ||
 				!validHexOpt(a.BgColor) || !validHexOpt(a.TextColor) || !validHexOpt(a.AccentColor) ||
-				a.FontScale < 0 || a.FontScale > 180 || (a.FontScale > 0 && a.FontScale < 60) ||
+				a.FontScale < 0 || a.FontScale > 250 || (a.FontScale > 0 && a.FontScale < 60) ||
 				a.LetterSpacing < -4 || a.LetterSpacing > 20 ||
 				a.Padding < 0 || a.Padding > 128 ||
 				(a.Align != "" && a.Align != "left" && a.Align != "center" && a.Align != "right") ||

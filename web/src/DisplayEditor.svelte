@@ -423,7 +423,7 @@
 
             <div class="grid-2">
               <label>{t('Cỡ chữ (%)', 'Font scale (%)')}
-                <input type="number" min="60" max="180" step="5" value={block.fontScale || 100} onchange={(e) => replace(selected, { fontScale: Number(e.currentTarget.value) })} />
+                <input type="number" min="60" max="250" step="5" value={block.fontScale || 100} onchange={(e) => replace(selected, { fontScale: Number(e.currentTarget.value) })} />
               </label>
               <label>{t('Dãn chữ', 'Letter spacing')}
                 <input type="number" min="-4" max="20" step="1" value={block.letterSpacing ?? 0} onchange={(e) => replace(selected, { letterSpacing: Number(e.currentTarget.value) })} />

@@ -76,7 +76,7 @@ export function validDisplayLayout(blocks) {
     const optLs = (v) => v === undefined || Number.isInteger(v) && v >= -4 && v <= 20;
     const widgetStyleValid = custom || (
       optHex(block?.bgColor) && optHex(block?.textColor) && optHex(block?.accentColor) &&
-      (block?.fontScale === undefined || block.fontScale === 0 || Number.isInteger(block.fontScale) && block.fontScale >= 60 && block.fontScale <= 180) &&
+      (block?.fontScale === undefined || block.fontScale === 0 || Number.isInteger(block.fontScale) && block.fontScale >= 60 && block.fontScale <= 250) &&
       optLs(block?.letterSpacing) && optPadding(block?.padding) &&
       optAlign(block?.align) && optValign(block?.valign) &&
       (block?.subLayout === undefined || block.subLayout === '' || ['default', 'reverse', 'compact'].includes(block.subLayout)) &&

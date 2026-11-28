@@ -51,7 +51,7 @@ func TestDisplayWidgetStyleValidation(t *testing.T) {
 	c.Blocks[0].BgColor = "#112233"
 	c.Blocks[0].TextColor = "#ffffff"
 	c.Blocks[0].AccentColor = "#22cc88"
-	c.Blocks[0].FontScale = 120
+	c.Blocks[0].FontScale = 250
 	c.Blocks[0].LetterSpacing = 4
 	c.Blocks[0].Padding = 20
 	c.Blocks[0].Align = "center"
@@ -66,7 +66,7 @@ func TestDisplayWidgetStyleValidation(t *testing.T) {
 	for _, invalid := range []displayBlock{
 		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, BgColor: "red"},
 		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, FontScale: 59},
-		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, FontScale: 181},
+		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, FontScale: 251},
 		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, LetterSpacing: -5},
 		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, LetterSpacing: 21},
 		{Type: "clock", X: 0, Y: 0, W: 3, H: 1, SubLayout: "floating"},

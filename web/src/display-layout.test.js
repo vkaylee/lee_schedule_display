@@ -39,6 +39,8 @@ assert.equal(validDisplayLayout([{ type: 'unknown', x: 0, y: 0, w: 1, h: 1 }]), 
 assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, bgColor: '#0f172a', textColor: '#f8fafc', accentColor: '#22c55e', fontScale: 115, letterSpacing: 3, padding: 18, align: 'center', valign: 'center', subLayout: 'reverse', hideParts: ['pill', 'title', 'organizer', 'progress'] }]), true);
 assert.equal(validDisplayLayout([{ id: 'upcoming', type: 'upcoming', x: 0, y: 0, w: 6, h: 4, hideParts: ['count', 'title', 'organizer', 'relative', 'duration'] }]), true);
 assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, bgColor: 'invalid' }]), false);
+assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, fontScale: 250 }]), true);
+assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, fontScale: 251 }]), false);
 assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, fontScale: 50 }]), false);
 assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, letterSpacing: 25 }]), false);
 assert.equal(validDisplayLayout([{ id: 'status', type: 'status', x: 0, y: 0, w: 6, h: 4, subLayout: 'diagonal' }]), false);
