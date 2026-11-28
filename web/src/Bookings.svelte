@@ -5,9 +5,17 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import Modal from './Modal.svelte';
   let confirmDialog = $state();
-  import { localTime, localTimeSeconds, instant } from './timezone.js';
+  import { localTime, localTimeSeconds, instant, addMinutesLocal, diffMinutesLocal, defaultBookingRange, formatDuration } from './timezone.js';
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
+  const DURATION_PRESETS = [
+    { minutes: 15, vi: '15p', en: '15m' },
+    { minutes: 30, vi: '30p', en: '30m' },
+    { minutes: 45, vi: '45p', en: '45m' },
+    { minutes: 60, vi: '1g', en: '1h' },
+    { minutes: 90, vi: '1g30', en: '1h30' },
+    { minutes: 120, vi: '2g', en: '2h' },
+  ];
   let rooms = $state([]), bookings = $state([]), series = $state([]), loading = $state(true), error = $state(''), notice = $state(''), busy = $state(false), zone = $state('');
   let bookingModalOpen = $state(false), bookingError = $state(''), seriesModalOpen = $state(false), seriesError = $state('');
   let alerts = $state([]), scanStatus = $state(null);
@@ -18,7 +26,12 @@
   let occurrenceTarget = $state(null);
   let seriesEdit = $state(null);
   let seriesDuration = 0, seriesStartText = '', seriesEndText = '';
-  let id = $state(null), version = $state(0), roomId = $state(''), title = $state(''), organizer = $state(''), isPrivate = $state(false), starts = $state(''), ends = $state('');
+  let id = $state(null), version = $state(0), roomId = $state(''), title = $state(''), organizer = $state(''), isPrivate = $state(false);
+  let startDate = $state(''), startTime = $state(''), endDate = $state(''), endTime = $state(''), multiDay = $state(false), rememberedDuration = $state(30);
+  const effectiveEndDate = $derived(multiDay ? endDate : startDate);
+  const starts = $derived(startDate && startTime ? `${startDate}T${startTime}` : '');
+  const ends = $derived(effectiveEndDate && endTime ? `${effectiveEndDate}T${endTime}` : '');
+  const durationMinutes = $derived(diffMinutesLocal(startDate, startTime, effectiveEndDate, endTime));
   async function load() {
     try {
       const [r, b, z, s, a, status] = await Promise.all([fetch('/api/rooms'), fetch('/api/bookings'), fetch('/api/timezone'), seriesEnabled ? fetch('/api/series') : Promise.resolve(null), fetch('/api/alerts'), fetch('/api/alerts/status')]);
@@ -34,13 +47,81 @@
     finally { busy = false; }
   }
   function clear() {
-    occurrenceTarget = null; seriesEdit = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false; starts = ''; ends = '';
+    occurrenceTarget = null; seriesEdit = null; id = null; roomId = ''; title = ''; organizer = ''; isPrivate = false;
+    startDate = ''; startTime = ''; endDate = ''; endTime = ''; multiDay = false; rememberedDuration = 30;
     repeatFrequency = 1; repeatInterval = 1; repeatCount = 2; repeatUntil = ''; repeatEnd = 'count';
     repeatWeekdays = []; repeatMonthMode = 'day'; repeatMonthDay = 1; repeatNth = 1; repeatNthWeekday = 1;
     seriesDuration = 0; seriesStartText = ''; seriesEndText = '';
   }
+  function applyDefaultRange() {
+    const def = defaultBookingRange(zone);
+    startDate = def.startDate;
+    startTime = def.startTime;
+    endDate = def.endDate;
+    endTime = def.endTime;
+    multiDay = def.multiDay;
+    rememberedDuration = 30;
+  }
+  function setRangeFromLocalStrings(startLocal, endLocal) {
+    startDate = startLocal.slice(0, 10);
+    startTime = startLocal.slice(11, 16);
+    endDate = endLocal.slice(0, 10);
+    endTime = endLocal.slice(11, 16);
+    multiDay = endDate !== startDate;
+    const diff = diffMinutesLocal(startDate, startTime, endDate, endTime);
+    rememberedDuration = diff && diff > 0 ? diff : 30;
+  }
+  function onStartChanged() {
+    if (!startDate || !startTime) return;
+    const shifted = addMinutesLocal(startDate, startTime, rememberedDuration > 0 ? rememberedDuration : 30);
+    if (!shifted) return;
+    endDate = shifted.date;
+    endTime = shifted.time;
+    multiDay = shifted.date !== startDate;
+  }
+  function onEndChanged() {
+    const targetEndDate = multiDay ? endDate : startDate;
+    if (!startDate || !startTime || !targetEndDate || !endTime) return;
+    const diff = diffMinutesLocal(startDate, startTime, targetEndDate, endTime);
+    if (diff !== null && diff > 0) rememberedDuration = diff;
+  }
+  function applyDurationPreset(mins) {
+    rememberedDuration = mins;
+    if (!startDate || !startTime) return;
+    const next = addMinutesLocal(startDate, startTime, mins);
+    if (!next) return;
+    endDate = next.date;
+    endTime = next.time;
+    multiDay = next.date !== startDate;
+  }
+  function toggleMultiDay() {
+    if (!multiDay) {
+      multiDay = true;
+      if (!endDate || endDate === startDate) {
+        if (startDate && startTime && endTime && endTime <= startTime) {
+          const nextDay = addMinutesLocal(startDate, '00:00', 1440);
+          if (nextDay) endDate = nextDay.date;
+        } else {
+          endDate = startDate;
+        }
+      }
+    } else {
+      multiDay = false;
+      endDate = startDate;
+    }
+    onEndChanged();
+  }
+  function moveEndToNextDay() {
+    if (!startDate) return;
+    const nextDay = addMinutesLocal(startDate, '00:00', 1440);
+    if (!nextDay) return;
+    multiDay = true;
+    endDate = nextDay.date;
+    onEndChanged();
+  }
   function openCreateBooking() {
     clear();
+    applyDefaultRange();
     bookingError = '';
     notice = '';
     bookingModalOpen = true;
@@ -53,6 +134,7 @@
   }
   function openCreateSeries() {
     clear();
+    applyDefaultRange();
     seriesError = '';
     notice = '';
     seriesModalOpen = true;
@@ -66,9 +148,10 @@
   function edit(b) {
     bookingError = ''; notice = '';
     occurrenceTarget = null; seriesEdit = null; id = b.id; version = b.version; roomId = String(b.room_id); title = b.title; organizer = b.organizer; isPrivate = b.private;
-    starts = localTimeSeconds(b.starts, zone);
-    ends = localTimeSeconds(b.ends, zone);
-    originalStart = b.starts; originalEnd = b.ends; originalStartText = starts; originalEndText = ends;
+    const startText = localTimeSeconds(b.starts, zone);
+    const endText = localTimeSeconds(b.ends, zone);
+    setRangeFromLocalStrings(startText, endText);
+    originalStart = b.starts; originalEnd = b.ends; originalStartText = startText; originalEndText = endText;
     bookingModalOpen = true;
   }
   function editSeries(s, scope, occurrence = null) {
@@ -77,9 +160,10 @@
     const durSec = Math.max(1, Math.round(rule.Duration / 1e9));
     const baseStart = scope === 'from' && occurrence ? occurrence.original_starts : Math.round(Date.parse(rule.Start) / 1000);
     roomId = String(s.room_id); title = s.title; organizer = s.organizer; isPrivate = s.private;
-    starts = localTimeSeconds(baseStart, zone);
-    ends = localTimeSeconds(baseStart + durSec, zone);
-    seriesDuration = durSec; seriesStartText = starts; seriesEndText = ends;
+    const sStart = localTimeSeconds(baseStart, zone);
+    const sEnd = localTimeSeconds(baseStart + durSec, zone);
+    setRangeFromLocalStrings(sStart, sEnd);
+    seriesDuration = durSec; seriesStartText = sStart; seriesEndText = sEnd;
     repeatFrequency = rule.Frequency; repeatInterval = rule.Interval;
     repeatWeekdays = rule.Weekdays ?? [];
     if (rule.Frequency === 3) {
@@ -144,9 +228,10 @@
     event.preventDefault(); bookingError = ''; notice = ''; busy = true;
     try {
       if (!zone) { bookingError = ['Chưa tải được múi giờ hệ thống. Vui lòng tải lại trang.', 'System time zone has not loaded. Please reload the page.']; return; }
-      const start = id && starts === originalStartText ? originalStart : instant(starts, zone);
-      const end = id && ends === originalEndText ? originalEnd : instant(ends, zone);
+      const start = id && starts === originalStartText.slice(0, 16) ? originalStart : instant(starts, zone);
+      const end = id && ends === originalEndText.slice(0, 16) ? originalEnd : instant(ends, zone);
       if (start === null || end === null) { bookingError = ['Giờ không tồn tại hoặc mơ hồ do chuyển giờ. Hãy chọn giờ khác.', 'Time is invalid or ambiguous due to a clock change. Choose another time.']; return; }
+      if (end <= start) { bookingError = ['Giờ kết thúc phải sau giờ bắt đầu.', 'End time must be after start time.']; return; }
       const response = await fetch(occurrenceTarget ? `/api/series/${occurrenceTarget.series}/occurrences/${occurrenceTarget.original}` : id ? `/api/bookings/${id}` : '/api/bookings', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify({room_id: Number(roomId), title: title.trim(), organizer: organizer.trim(), private: isPrivate, starts: start, ends: end, version: id ? version : 0}),
@@ -162,8 +247,8 @@
     const editingSeries = seriesEdit;
     try {
       if (!zone) { seriesError = ['Chưa tải được múi giờ hệ thống. Vui lòng tải lại trang.', 'System time zone has not loaded. Please reload the page.']; return; }
-      const start = instant(starts, zone);
-      const end = editingSeries && starts === seriesStartText && ends === seriesEndText && start !== null ? start + seriesDuration : instant(ends, zone);
+      const start = editingSeries && starts === seriesStartText.slice(0, 16) ? instant(seriesStartText, zone) : instant(starts, zone);
+      const end = editingSeries && starts === seriesStartText.slice(0, 16) && ends === seriesEndText.slice(0, 16) && start !== null ? start + seriesDuration : instant(ends, zone);
       if (start === null || end === null || end <= start) { seriesError = ['Giờ không hợp lệ hoặc mơ hồ.', 'Invalid or ambiguous time.']; return; }
       const frequency = Number(repeatFrequency);
       const rule = {frequency, interval:Number(repeatInterval), count:repeatEnd === 'count' ? Number(repeatCount) : 0, until:repeatEnd === 'until' ? repeatUntil : ''};
@@ -232,16 +317,70 @@
     <span>{t('Riêng tư', 'Private')}</span>
   </label>
 
-  <div class="form-grid-2">
-    <div>
-      <label for={`${prefix}-start`}>{t('Bắt đầu', 'Start')}</label>
-      <input id={`${prefix}-start`} type="datetime-local" step="1" bind:value={starts} required />
+  <fieldset class="time-section">
+    <legend class="sr-only">{t('Thời gian họp', 'Meeting time')}</legend>
+
+    <div class="time-date-row" class:has-end-date={multiDay}>
+      <div class="time-field">
+        <label for={`${prefix}-date`}>{multiDay ? t('Ngày bắt đầu', 'Start date') : t('Ngày họp', 'Date')}</label>
+        <input id={`${prefix}-date`} type="date" bind:value={startDate} oninput={() => queueMicrotask(onStartChanged)} required />
+      </div>
+      {#if multiDay}
+        <div class="time-field">
+          <label for={`${prefix}-end-date`}>{t('Ngày kết thúc', 'End date')}</label>
+          <input id={`${prefix}-end-date`} type="date" bind:value={endDate} min={startDate || undefined} oninput={() => queueMicrotask(onEndChanged)} required />
+        </div>
+      {/if}
     </div>
-    <div>
-      <label for={`${prefix}-end`}>{t('Kết thúc', 'End')}</label>
-      <input id={`${prefix}-end`} type="datetime-local" step="1" bind:value={ends} required />
+
+    <div class="form-grid-2">
+      <div class="time-field">
+        <label for={`${prefix}-start`}>{t('Bắt đầu', 'Start')}</label>
+        <input id={`${prefix}-start`} type="time" step="60" bind:value={startTime} oninput={() => queueMicrotask(onStartChanged)} required />
+      </div>
+      <div class="time-field">
+        <label for={`${prefix}-end`}>{t('Kết thúc', 'End')}</label>
+        <input id={`${prefix}-end`} type="time" step="60" bind:value={endTime} oninput={() => queueMicrotask(onEndChanged)} required />
+      </div>
     </div>
-  </div>
+
+    <div class="time-meta-bar">
+      <div class="duration-presets" role="group" aria-label={t('Thời lượng nhanh', 'Quick duration')}>
+        {#each DURATION_PRESETS as preset (preset.minutes)}
+          <button
+            type="button"
+            class="preset-chip"
+            class:is-active={durationMinutes === preset.minutes}
+            aria-pressed={durationMinutes === preset.minutes}
+            onclick={() => applyDurationPreset(preset.minutes)}
+          >
+            {language === 'en' ? preset.en : preset.vi}
+          </button>
+        {/each}
+      </div>
+      <button type="button" class="link-toggle" aria-pressed={multiDay} onclick={toggleMultiDay}>
+        {multiDay ? t('Gộp về 1 ngày', 'Same-day only') : t('+ Kết thúc ngày khác', '+ Different end date')}
+      </button>
+    </div>
+
+    {#if durationMinutes !== null && durationMinutes > 0}
+      <p class="field-hint duration-summary">
+        {t('Thời lượng:', 'Duration:')} <strong>{formatDuration(durationMinutes, language)}</strong>
+        {#if multiDay && startDate && endDate && endDate !== startDate}
+          <span class="mono">({startDate} → {endDate})</span>
+        {/if}
+      </p>
+    {:else if durationMinutes !== null && durationMinutes <= 0 && startTime && endTime}
+      <div class="time-error" role="alert">
+        <span>{t('Giờ kết thúc phải sau giờ bắt đầu.', 'End time must be after start time.')}</span>
+        {#if !multiDay}
+          <button type="button" class="link-toggle" onclick={moveEndToNextDay}>
+            {t('Đẩy sang ngày hôm sau (+1 ngày)', 'Move end to next day (+1 day)')}
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </fieldset>
 {/snippet}
 
 <section aria-labelledby="bookings-heading">
@@ -584,7 +723,7 @@
         {/if}
 
         <div class="ui-form-actions">
-          <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends}>{seriesEdit ? t('Lưu thay đổi chuỗi', 'Save series changes') : t('Tạo chuỗi', 'Create series')}</button>
+          <button type="submit" disabled={busy || !roomId || !title || !organizer || !starts || !ends || (durationMinutes !== null && durationMinutes <= 0)}>{seriesEdit ? t('Lưu thay đổi chuỗi', 'Save series changes') : t('Tạo chuỗi', 'Create series')}</button>
           <button class="secondary" type="button" onclick={closeSeriesModal} disabled={busy}>{t('Hủy', 'Cancel')}</button>
         </div>
       </form>
@@ -908,8 +1047,108 @@
     color: var(--ink-muted);
   }
 
+  .time-section {
+    display: grid;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+  }
+
+  .time-date-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+
+  .time-date-row.has-end-date {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .time-field {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+
+  .time-meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .duration-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .preset-chip {
+    min-height: 2rem !important;
+    padding: 0.25rem 0.65rem !important;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: var(--radius-pill) !important;
+    background: var(--bg-surface) !important;
+    color: var(--ink-secondary) !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+  }
+
+  .preset-chip:hover:not(:disabled) {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+    background: var(--bg-surface) !important;
+  }
+
+  .preset-chip.is-active {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+    color: #134e31 !important;
+  }
+
+  .link-toggle {
+    min-height: auto !important;
+    padding: 0.2rem 0.4rem !important;
+    border: 0 !important;
+    border-radius: var(--radius-sm) !important;
+    background: transparent !important;
+    color: var(--accent) !important;
+    font-size: 0.8rem !important;
+    font-weight: 600 !important;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .link-toggle:hover:not(:disabled) {
+    background: var(--accent-soft) !important;
+  }
+
+  .duration-summary strong {
+    color: var(--ink-primary);
+  }
+
+  .time-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--radius-sm);
+    background: var(--danger-soft);
+    border: 1px solid var(--danger-border);
+    color: #7d201a;
+    font-size: 0.82rem;
+    font-weight: 550;
+  }
+
   @media (max-width: 560px) {
-    .form-grid-2 {
+    .form-grid-2,
+    .time-date-row.has-end-date {
       grid-template-columns: 1fr;
     }
   }
