@@ -260,14 +260,28 @@
                 </div>
               {/if}
             </div>
-          {:else if status === 'Trống' && schedule.upcoming.length && (hasPart(block, 'until') || hasPart(block, 'remaining'))}
-            {@const rem = formatDuration(schedule.upcoming[0].starts - scheduleNow, language)}
-            <div class="status-meta">
-              <div class="status-window">
-                {#if hasPart(block, 'until')}<p class="status-until">{t('Trống đến', 'Free until')} {time(schedule.upcoming[0].starts)}</p>{/if}
-                {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
+          {:else if status === 'Trống' && schedule.upcoming.length}
+            {@const nextEntry = schedule.upcoming[0]}
+            {@const nextTitle = !hasPart(block, 'title') ? '' : nextEntry.private ? t('Cuộc họp riêng tư', 'Private meeting') : (nextEntry.title || '')}
+            {@const nextOrganizer = nextEntry.private || !hasPart(block, 'organizer') ? '' : (nextEntry.organizer || '')}
+            {@const rem = formatDuration(nextEntry.starts - scheduleNow, language)}
+            {#if nextTitle || nextOrganizer}
+              <div class="status-booking status-next">
+                <span class="status-booking-kicker">{t('Sắp tới', 'Up next')}</span>
+                {#if nextTitle}<p class="status-booking-title" class:is-private={nextEntry.private}>{nextTitle}</p>{/if}
+                {#if nextOrganizer}
+                  <p class="status-booking-organizer"><Icon name="user" class="status-org-icon" /><span>{nextOrganizer}</span></p>
+                {/if}
               </div>
-            </div>
+            {/if}
+            {#if hasPart(block, 'until') || (hasPart(block, 'remaining') && rem)}
+              <div class="status-meta">
+                <div class="status-window">
+                  {#if hasPart(block, 'until')}<p class="status-until">{t('Trống đến', 'Free until')} {time(nextEntry.starts)}</p>{/if}
+                  {#if hasPart(block, 'remaining') && rem}<span class="status-remaining">{t('Còn', 'Remaining')} {rem}</span>{/if}
+                </div>
+              </div>
+            {/if}
           {:else if status === 'Trống' && hasPart(block, 'until')}
             <p class="status-note">{t('Không có lịch kế tiếp', 'No upcoming meetings')}</p>
           {/if}
@@ -791,6 +805,13 @@
     padding-top: 0.65rem;
     border-top: 1px solid rgba(24, 44, 35, 0.08);
   }
+  .status-booking-kicker {
+    font-size: calc(clamp(0.64rem, 2.2cqi, 0.78rem) * var(--w-font-scale, 1));
+    font-weight: 750;
+    letter-spacing: calc(0.11em + var(--w-ls, 0) * 0.01em);
+    text-transform: uppercase;
+    color: var(--accent, #1b6340);
+  }
   .status-window {
     display: flex;
     flex-wrap: wrap;
@@ -1032,6 +1053,7 @@
   }
   .block.has-custom-fg .clock-date,
   .block.has-custom-fg .room-eyebrow,
+  .block.has-custom-fg .status-booking-kicker,
   .block.has-custom-fg .status-note,
   .block.has-custom-fg .kicker,
   .block.has-custom-fg .upcoming-empty,
@@ -1064,6 +1086,7 @@
 
   .block.has-custom-accent .widget-eyebrow,
   .block.has-custom-accent .room-eyebrow :global(.icon),
+  .block.has-custom-accent .status-booking-kicker,
   .block.has-custom-accent :global(.widget-status-icon),
   .block.has-custom-accent .upcoming-relative {
     color: var(--w-accent);
