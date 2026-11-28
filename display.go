@@ -21,6 +21,7 @@ type displayBlock struct {
 	W             int      `json:"w"`
 	H             int      `json:"h"`
 	ID            string   `json:"id,omitempty"`
+	RoomID        int64    `json:"roomId,omitempty"`
 	Text          string   `json:"text,omitempty"`
 	Color         string   `json:"color,omitempty"`
 	BgColor       string   `json:"bgColor,omitempty"`
@@ -46,10 +47,11 @@ type displayConfig struct {
 }
 
 func defaultDisplayConfig() displayConfig {
-	return displayConfig{Blocks: []displayBlock{{Type: "clock", X: 0, Y: 0, W: 3, H: 1}, {Type: "branding", X: 3, Y: 0, W: 9, H: 1}, {Type: "room", X: 0, Y: 1, W: 12, H: 1}, {Type: "status", X: 0, Y: 2, W: 7, H: 4}, {Type: "upcoming", X: 7, Y: 2, W: 5, H: 4}, {Type: "footer", X: 0, Y: 6, W: 12, H: 1}}}
+	return displayConfig{Blocks: []displayBlock{{Type: "clock", X: 0, Y: 0, W: 3, H: 1}, {Type: "branding", X: 3, Y: 0, W: 9, H: 1}, {Type: "room", ID: "room", X: 0, Y: 1, W: 12, H: 1}, {Type: "status", ID: "status", X: 0, Y: 2, W: 7, H: 4}, {Type: "upcoming", ID: "upcoming", X: 7, Y: 2, W: 5, H: 4}, {Type: "footer", X: 0, Y: 6, W: 12, H: 1}}}
 }
 
 var layerID = regexp.MustCompile(`^layer_[a-zA-Z0-9_-]{1,58}$`)
+var widgetID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 var layerColor = regexp.MustCompile(`^#[a-fA-F0-9]{6}$`)
 
 var widgetHideParts = map[string]map[string]bool{
@@ -98,7 +100,16 @@ func validDisplayConfig(c displayConfig) bool {
 		key := a.Type
 		switch a.Type {
 		case "clock", "branding", "room", "status", "upcoming", "footer":
-			if a.ID != "" || a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Margin != 0 ||
+			roomWidget := a.Type == "room" || a.Type == "status" || a.Type == "upcoming"
+			if roomWidget {
+				if !widgetID.MatchString(a.ID) || a.RoomID < 0 || a.RoomID > 9007199254740991 {
+					return false
+				}
+				key = a.ID
+			} else if a.ID != "" || a.RoomID != 0 {
+				return false
+			}
+			if a.Text != "" || a.Color != "" || a.FontSize != 0 || a.Margin != 0 ||
 				!validHexOpt(a.BgColor) || !validHexOpt(a.TextColor) || !validHexOpt(a.AccentColor) ||
 				a.FontScale < 0 || a.FontScale > 180 || (a.FontScale > 0 && a.FontScale < 60) ||
 				a.LetterSpacing < -4 || a.LetterSpacing > 20 ||
@@ -110,7 +121,7 @@ func validDisplayConfig(c displayConfig) bool {
 				return false
 			}
 		case "text":
-			if !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" ||
+			if a.RoomID != 0 || !layerID.MatchString(a.ID) || len(a.Text) > 512 || a.Color != "" ||
 				!validHexOpt(a.BgColor) || !validHexOpt(a.TextColor) || a.AccentColor != "" ||
 				a.FontScale != 0 || a.SubLayout != "" || len(a.HideParts) > 0 ||
 				a.LetterSpacing < -4 || a.LetterSpacing > 20 ||
@@ -122,7 +133,7 @@ func validDisplayConfig(c displayConfig) bool {
 			}
 			key = a.ID
 		case "rectangle":
-			if !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" ||
+			if a.RoomID != 0 || !layerID.MatchString(a.ID) || !layerColor.MatchString(a.Color) || a.Text != "" ||
 				a.BgColor != "" || a.TextColor != "" || a.AccentColor != "" ||
 				a.FontSize != 0 || a.FontScale != 0 || a.LetterSpacing != 0 ||
 				a.Padding != 0 || a.Margin != 0 || a.Align != "" || a.VAlign != "" ||
@@ -160,7 +171,8 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		var raw string
-		err = db.QueryRow("SELECT display_config FROM devices WHERE id=? AND revoked=0", id).Scan(&raw)
+		var roomID sql.NullInt64
+		err = db.QueryRow("SELECT display_config,room_id FROM devices WHERE id=? AND revoked=0", id).Scan(&raw, &roomID)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -169,8 +181,8 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
-		c := defaultDisplayConfig()
-		if raw != "" && (json.Unmarshal([]byte(raw), &c) != nil || !validDisplayConfig(c)) {
+		c, err := readDisplayConfig(raw, roomID.Int64)
+		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
@@ -219,6 +231,44 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
+		var previousRaw string
+		var previousRoom sql.NullInt64
+		err = tx.QueryRow("SELECT display_config,room_id FROM devices WHERE id=? AND revoked=0", id).Scan(&previousRaw, &previousRoom)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		previous, err := readDisplayConfig(previousRaw, previousRoom.Int64)
+		if err != nil {
+			http.Error(w, "internal error", 500)
+			return
+		}
+		oldRooms := make(map[string]displayBlock)
+		for _, block := range previous.Blocks {
+			if block.RoomID > 0 {
+				oldRooms[block.ID] = block
+			}
+		}
+		for _, block := range c.Blocks {
+			old := oldRooms[block.ID]
+			if block.RoomID == 0 || old.RoomID == block.RoomID && old.Type == block.Type {
+				continue
+			}
+			var active bool
+			err = tx.QueryRow("SELECT active FROM rooms WHERE id=?", block.RoomID).Scan(&active)
+			if errors.Is(err, sql.ErrNoRows) || err == nil && !active {
+				http.Error(w, "invalid room", 400)
+				return
+			}
+			if err != nil {
+				http.Error(w, "internal error", 500)
+				return
+			}
+		}
 		result, err := tx.Exec("UPDATE devices SET display_config=? WHERE id=? AND revoked=0", string(raw), id)
 		if err != nil {
 			http.Error(w, "internal error", 500)
@@ -252,9 +302,9 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			return
 		}
 		defer tx.Rollback()
-		var raw, room, language string
-		var roomID int64
-		err = tx.QueryRow("SELECT devices.display_config,rooms.id,rooms.name,devices.language FROM devices JOIN rooms ON rooms.id=devices.room_id WHERE devices.public_id=? AND devices.revoked=0 AND rooms.active=1", value).Scan(&raw, &roomID, &room, &language)
+		var raw, language string
+		var legacyRoom sql.NullInt64
+		err = tx.QueryRow("SELECT display_config,language,room_id FROM devices WHERE public_id=? AND revoked=0", value).Scan(&raw, &language, &legacyRoom)
 		if errors.Is(err, sql.ErrNoRows) {
 			http.NotFound(w, r)
 			return
@@ -263,52 +313,22 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 			http.Error(w, "internal error", 500)
 			return
 		}
-		c := defaultDisplayConfig()
-		if raw != "" && (json.Unmarshal([]byte(raw), &c) != nil || !validDisplayConfig(c)) {
+		c, err := readDisplayConfig(raw, legacyRoom.Int64)
+		if err != nil {
 			http.Error(w, "internal error", 500)
 			return
 		}
 		now := time.Now().Unix()
-		rows, err := tx.Query("SELECT starts,ends FROM (SELECT starts,ends FROM bookings WHERE room_id=? AND canceled=0 AND ends>? UNION ALL SELECT o.starts,o.ends FROM series_occurrences o JOIN booking_series s ON s.id=o.series_id WHERE s.canceled=0 AND COALESCE(o.room_id,s.room_id)=? AND o.canceled=0 AND o.ends>?) ORDER BY starts,ends LIMIT 101", roomID, now, roomID, now)
-		if err != nil {
-			http.Error(w, "internal error", 500)
-			return
-		}
-		defer rows.Close()
-		type entry struct {
-			Starts int64 `json:"starts"`
-			Ends   int64 `json:"ends"`
-		}
-		entries := []entry{}
-		for rows.Next() {
-			var e entry
-			if rows.Scan(&e.Starts, &e.Ends) != nil {
-				http.Error(w, "internal error", 500)
-				return
+		rooms := make(map[string]publicRoom)
+		for _, block := range c.Blocks {
+			if block.RoomID <= 0 {
+				continue
 			}
-			entries = append(entries, e)
-		}
-		if rows.Err() != nil {
-			http.Error(w, "internal error", 500)
-			return
-		}
-		if err = rows.Close(); err != nil {
-			http.Error(w, "internal error", 500)
-			return
-		}
-		var validUntil *int64
-		if len(entries) > 100 {
-			cutoff := entries[100].Starts
-			validUntil = &cutoff
-			entries = entries[:100]
-		}
-		coverage, err := trustedDisplayCoverage(tx, roomID, now)
-		if err != nil {
-			http.Error(w, "internal error", 500)
-			return
-		}
-		if coverage.Valid && (validUntil == nil || coverage.Int64 < *validUntil) {
-			validUntil = &coverage.Int64
+			key := strconv.FormatInt(block.RoomID, 10)
+			if _, ok := rooms[key]; ok {
+				continue
+			}
+			rooms[key] = loadPublicRoom(tx, block.RoomID, now)
 		}
 		if err = tx.Commit(); err != nil {
 			http.Error(w, "internal error", 500)
@@ -316,12 +336,10 @@ func registerDisplayHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Hand
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
-			Config     displayConfig `json:"config"`
-			Room       string        `json:"room"`
-			Language   string        `json:"language"`
-			Now        int64         `json:"now"`
-			Entries    []entry       `json:"entries"`
-			ValidUntil *int64        `json:"valid_until"`
-		}{c, room, language, now, entries, validUntil})
+			Config   displayConfig         `json:"config"`
+			Language string                `json:"language"`
+			Now      int64                 `json:"now"`
+			Rooms    map[string]publicRoom `json:"rooms"`
+		}{c, language, now, rooms})
 	})
 }

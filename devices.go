@@ -26,7 +26,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		type device struct {
 			ID       int64  `json:"id"`
 			Name     string `json:"name"`
-			RoomID   int64  `json:"room_id"`
+			RoomID   *int64 `json:"room_id"`
 			Revoked  bool   `json:"revoked"`
 			LastSeen *int64 `json:"last_seen"`
 			Language string `json:"language"`
@@ -69,7 +69,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 				}
 				d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 				d.DisallowUnknownFields()
-				if d.Decode(&input) != nil || d.Decode(&struct{}{}) != io.EOF || input.Name == "" || strings.TrimSpace(input.Name) != input.Name || len(input.Name) > 128 || input.RoomID <= 0 {
+				if d.Decode(&input) != nil || d.Decode(&struct{}{}) != io.EOF || input.Name == "" || strings.TrimSpace(input.Name) != input.Name || len(input.Name) > 128 || input.RoomID < 0 {
 					http.Error(w, "invalid request", 400)
 					return
 				}
@@ -108,14 +108,30 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 				return
 			}
 			if action == "create" {
-				var active bool
-				err = tx.QueryRow("SELECT active FROM rooms WHERE id=?", roomID).Scan(&active)
-				if errors.Is(err, sql.ErrNoRows) || err == nil && !active {
-					http.Error(w, "invalid room", 400)
-					return
+				var legacyRoom any
+				if roomID > 0 {
+					var active bool
+					err = tx.QueryRow("SELECT active FROM rooms WHERE id=?", roomID).Scan(&active)
+					if errors.Is(err, sql.ErrNoRows) || err == nil && !active {
+						http.Error(w, "invalid room", 400)
+						return
+					}
+					legacyRoom = roomID
 				}
 				if err == nil {
-					_, err = tx.Exec("INSERT INTO devices(name,room_id,token_hash,public_id) VALUES(?,?,?,lower(hex(randomblob(16))))", name, roomID, tokenHash(deviceToken))
+					c := defaultDisplayConfig()
+					for i := range c.Blocks {
+						b := &c.Blocks[i]
+						if b.Type == "room" || b.Type == "status" || b.Type == "upcoming" {
+							b.ID, b.RoomID = b.Type, roomID
+						}
+					}
+					raw, e := json.Marshal(c)
+					if e != nil {
+						http.Error(w, "internal error", 500)
+						return
+					}
+					_, err = tx.Exec("INSERT INTO devices(name,room_id,token_hash,public_id,display_config) VALUES(?,?,?,lower(hex(randomblob(16))),?)", name, legacyRoom, tokenHash(deviceToken), string(raw))
 				}
 			} else {
 				var result sql.Result

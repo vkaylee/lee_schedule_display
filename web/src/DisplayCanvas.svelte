@@ -3,11 +3,10 @@
   import { displaySchedule, formatDuration, meetingProgress } from './display-schedule.js';
   import { canvasScale, gridCell, hexColorRe, moveBlock, resizeEdges } from './display-layout.js';
 
-  let { config, data, status = 'Không xác định', zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {}, oninspect = () => {} } = $props();
+  let { config, data, statuses = {}, zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {}, oninspect = () => {} } = $props();
 
   const t = (vi, en) => language === 'en' ? en : vi;
   let locale = $derived(language === 'en' ? 'en-US' : 'vi-VN');
-  let statusText = $derived(language === 'en' ? ({ 'Không xác định':'Unknown', 'Đang họp':'In meeting', 'Trống':'Available' }[status] || status) : status);
   let viewportWidth = $state(0), windowHeight = $state(0);
   let resizeStart = null;
   let dragging = $state(null);
@@ -16,8 +15,6 @@
 
   let rowCount = $derived(config.rows || Math.max(7, ...config.blocks.map(block => block.y + block.h)));
   let scale = $derived(canvasScale(config.width, config.height, viewportWidth, editing ? Math.max(280, windowHeight * 0.7) : windowHeight, editing ? zoomMode : 'fit', editing ? zoom : 1));
-  let schedule = $derived(displaySchedule(data?.entries || [], scheduleNow ?? 0, data?.valid_until));
-  let progress = $derived(status === 'Đang họp' && scheduleNow !== null ? meetingProgress(schedule.current, scheduleNow) : 0);
 
   let labels = $derived(language === 'en'
     ? { clock: 'Clock & date', branding: 'Organization', room: 'Room name', status: 'Status', upcoming: 'Upcoming', footer: 'Connection', text:'Text', rectangle:'Rectangle' }
@@ -158,6 +155,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="canvas" class:editing class:fixed={!!config.width} style={`--rows:${rowCount};${config.width ? `width:${config.width}px;height:${config.height}px;transform:scale(${scale});` : ''}`} ondragover={previewDrag} ondrop={drop}>
   {#each config.blocks as block (key(block))}
+    {@const roomData = data?.rooms?.[block.roomId]}
+    {@const status = statuses[block.roomId] || 'Không xác định'}
+    {@const statusText = language === 'en' ? ({ 'Không xác định':'Unknown', 'Đang họp':'In meeting', 'Trống':'Available' }[status] || status) : status}
+    {@const schedule = displaySchedule(roomData?.entries || [], scheduleNow ?? 0, roomData?.valid_until)}
+    {@const progress = status === 'Đang họp' && scheduleNow !== null ? meetingProgress(schedule.current, scheduleNow) : 0}
     {#if editing && dragPreview?.key === key(block) && (dragPreview.x !== dragging.block.x || dragPreview.y !== dragging.block.y)}<div class="drag-origin" aria-hidden="true" style={`grid-column:${dragging.block.x + 1} / span ${block.w};grid-row:${dragging.block.y + 1} / span ${block.h}`}></div>{/if}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <section
@@ -225,7 +227,7 @@
             <span>{t('PHÒNG HỌP', 'MEETING ROOM')}</span>
           </div>
         {/if}
-        <h1>{data?.room || t('Phòng họp', 'Meeting room')}</h1>
+        <h1>{roomData?.room || (block.roomId ? t('Phòng không khả dụng', 'Room unavailable') : t('Chưa chọn phòng', 'No room selected'))}</h1>
 
       {:else if block.type === 'status'}
         {#if hasPart(block, 'pill')}
@@ -312,12 +314,12 @@
       {:else if block.type === 'footer'}
         <div class="footer-bar">
           <small class="footer-row">
-            <span class="footer-dot" class:is-offline={status === 'Không xác định'} aria-hidden="true"></span>
-            <span>{status === 'Không xác định' ? t('Không thể xác minh kết nối', 'Connection cannot be verified') : t('Hệ thống đang hoạt động', 'System online')}</span>
+            <span class="footer-dot" class:is-offline={!data} aria-hidden="true"></span>
+            <span>{!data ? t('Không thể xác minh kết nối', 'Connection cannot be verified') : t('Hệ thống đang hoạt động', 'System online')}</span>
           </small>
           {#if hasPart(block, 'badge') || hasPart(block, 'zone')}
             <span class="footer-meta">
-              {#if hasPart(block, 'badge')}<span class="footer-badge">{status === 'Không xác định' ? t('Ngoại tuyến', 'Offline') : t('Trực tuyến', 'Live')}</span>{/if}
+              {#if hasPart(block, 'badge')}<span class="footer-badge">{!data ? t('Ngoại tuyến', 'Offline') : t('Trực tuyến', 'Live')}</span>{/if}
               {#if hasPart(block, 'zone')}<span class="footer-zone mono">{zone}</span>{/if}
             </span>
           {/if}

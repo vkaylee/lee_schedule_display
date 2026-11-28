@@ -6,7 +6,7 @@
   let editing = $state(null);
   let { csrf, language = 'vi' } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
-  let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), roomId = $state(''), token = $state(''), copied = $state(false), error = $state(''), busy = $state(false);
+  let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), token = $state(''), copied = $state(false), error = $state(''), busy = $state(false);
   async function load() {
     error = '';
     try {
@@ -19,9 +19,9 @@
   async function create(event) {
     event.preventDefault(); busy = true; error = ''; token = ''; copied = false;
     try {
-      const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim(),room_id:Number(roomId)})});
+      const response = await fetch('/api/devices', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({name:name.trim()})});
       if (!response.ok) throw new Error();
-      token = (await response.json()).token; name = ''; roomId = ''; await load();
+      token = (await response.json()).token; name = ''; await load();
     } catch { error = ['Không thể tạo thiết bị.', 'Could not create device.']; }
     finally { busy = false; }
   }
@@ -75,7 +75,7 @@
     <div>
       <p class="section-kicker">{t('PHẦN CỨNG & HIỂN THỊ', 'HARDWARE & DISPLAYS')}</p>
       <h2 id="device-heading">{t('Thiết bị màn hình', 'Display devices')}</h2>
-      <p>{t('Ghép màn hình kiosk, cấu hình ngôn ngữ và tùy chỉnh giao diện hiển thị từng phòng.', 'Pair room kiosks, configure language, and design each display layout.')}</p>
+      <p>{t('Cấu hình ngôn ngữ và thiết kế màn hình hiển thị nhiều phòng.', 'Configure language and design displays for multiple rooms.')}</p>
     </div>
   </div>
 
@@ -100,7 +100,7 @@
   {/if}
 
   {#if editing}
-    <DisplayEditor device={editing} {csrf} {language} onclose={() => editing = null} />
+    <DisplayEditor device={editing} {rooms} {csrf} {language} onclose={() => editing = null} />
   {/if}
 
   <div class="ui-split">
@@ -122,7 +122,6 @@
               <div class="device-info">
                 <div class="device-title-row">
                   <strong>{device.name}</strong>
-                  <span class="room-badge">{rooms.find(r => r.id === device.room_id)?.name ?? t('Chưa gán phòng', 'Unassigned')}</span>
                   <span class={device.revoked ? 'ui-pill ui-pill--danger' : 'ui-pill ui-pill--success'}>
                     {device.revoked ? t('Đã thu hồi', 'Revoked') : t('Hoạt động', 'Active')}
                   </span>
@@ -173,13 +172,6 @@
         <h3>{t('Đăng ký thiết bị', 'Register device')}</h3>
         <label for="device-name">{t('Tên thiết bị', 'Device name')}</label>
         <input id="device-name" bind:value={name} maxlength="128" required placeholder={t('Ví dụ: iPad Cửa Phòng A', 'e.g. Lobby Tablet 01')} />
-        <label for="device-room">{t('Phòng thiết bị', 'Device room')}</label>
-        <select id="device-room" bind:value={roomId} required>
-          <option value="">{t('Chọn phòng', 'Select room')}</option>
-          {#each rooms.filter(r => r.active) as room}
-            <option value={String(room.id)}>{room.name}</option>
-          {/each}
-        </select>
         <button type="submit" disabled={busy}>{t('Tạo thiết bị', 'Create device')}</button>
       </form>
     </div>

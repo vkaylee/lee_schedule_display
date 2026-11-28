@@ -44,7 +44,7 @@ func TestDeviceLanguageMigrationFromVersion6(t *testing.T) {
 	if err := db.QueryRow("SELECT language FROM devices WHERE id=1").Scan(&language); err != nil || language != "vi" {
 		t.Fatalf("language=%q error=%v", language, err)
 	}
-	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 16 {
+	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 17 {
 		t.Fatalf("version=%d error=%v", version, err)
 	}
 }

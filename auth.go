@@ -33,7 +33,7 @@ func migrate(db *sql.DB) error {
 	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 16 {
+	if version > 17 {
 		return errors.New("unsupported database version")
 	}
 	if version == 0 {
@@ -153,6 +153,11 @@ PRAGMA user_version = 13`); err != nil {
 ALTER TABLE booking_series ADD COLUMN canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1));
 CREATE TABLE series_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
 PRAGMA user_version = 16`); err != nil {
+			return err
+		}
+	}
+	if version <= 16 {
+		if err := migrateDisplayRooms(tx); err != nil {
 			return err
 		}
 	}

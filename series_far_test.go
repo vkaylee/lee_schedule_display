@@ -280,7 +280,7 @@ func TestSeriesMigrationVersion10(t *testing.T) {
 		t.Fatal(err)
 	}
 	var horizon, count, version int
-	if err = db.QueryRow("SELECT checked_through,(SELECT COUNT(*) FROM series_occurrences), (SELECT user_version FROM pragma_user_version) FROM booking_series WHERE id=1").Scan(&horizon, &count, &version); err != nil || horizon != 400 || count != 2 || version != 16 {
+	if err = db.QueryRow("SELECT checked_through,(SELECT COUNT(*) FROM series_occurrences), (SELECT user_version FROM pragma_user_version) FROM booking_series WHERE id=1").Scan(&horizon, &count, &version); err != nil || horizon != 400 || count != 2 || version != 17 {
 		t.Fatalf("migration horizon=%d count=%d version=%d err=%v", horizon, count, version, err)
 	}
 	if err = migrate(db); err != nil {

@@ -147,6 +147,9 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 		t.Fatal(w.Header())
 	}
 	config := defaultDisplayConfig()
+	config.Blocks[2].RoomID = 1
+	config.Blocks[3].RoomID = 1
+	config.Blocks[4].RoomID = 1
 	config.Organization = "Example"
 	config.Width, config.Height, config.Rows = 1920, 1080, 7
 	config.Blocks = append(config.Blocks, displayBlock{Type: "rectangle", ID: "layer_box", X: 0, Y: 0, W: 4, H: 2, Color: "#123456"}, displayBlock{Type: "text", ID: "layer_text", X: 0, Y: 0, W: 4, H: 1, Text: "<b>hello</b>"})
@@ -171,6 +174,20 @@ func TestDisplayPublicPrivacyAndConfiguration(t *testing.T) {
 	if w = request("GET", "/api/devices/2/display", "", true); w.Code != 200 || strings.Contains(w.Body.String(), `"width"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	if _, err := db.Exec("UPDATE rooms SET active=0 WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	config.Organization = "Changed"
+	raw, _ = json.Marshal(config)
+	if w = request("POST", "/api/devices/1/display", string(raw), true); w.Code != 204 {
+		t.Fatalf("unchanged inactive room: %d %s", w.Code, w.Body.String())
+	}
+	config.Blocks = append(config.Blocks, displayBlock{Type: "room", ID: "new-room", RoomID: 1, W: 1, H: 1})
+	raw, _ = json.Marshal(config)
+	if w = request("POST", "/api/devices/1/display", string(raw), true); w.Code != 400 {
+		t.Fatalf("new inactive room: %d %s", w.Code, w.Body.String())
+	}
+	config.Blocks = config.Blocks[:len(config.Blocks)-1]
 	config.Blocks[1].X = 12
 	raw, _ = json.Marshal(config)
 	if w = request("POST", "/api/devices/1/display", string(raw), true); w.Code != 400 {

@@ -1,4 +1,5 @@
 export const displayBlocks = ['clock', 'branding', 'room', 'status', 'upcoming', 'footer'];
+export const roomBlocks = ['room', 'status', 'upcoming'];
 
 export const widgetParts = {
   clock: ['zone', 'date'],
@@ -10,6 +11,13 @@ export const widgetParts = {
 };
 
 export const hexColorRe = /^#[a-fA-F0-9]{6}$/;
+export const blockKey = block => block.id || block.type;
+
+export function hasInvalidRoomAssignment(blocks, rooms, savedBlocks) {
+  return blocks.some(block => roomBlocks.includes(block.type) && block.roomId &&
+    !rooms.some(room => room.id === block.roomId && room.active) &&
+    !savedBlocks.some(saved => saved.id === block.id && saved.type === block.type && saved.roomId === block.roomId));
+}
 
 export function contrastRatio(hexA, hexB) {
   if (!hexColorRe.test(hexA || '') || !hexColorRe.test(hexB || '')) return null;
@@ -24,9 +32,9 @@ export function contrastRatio(hexA, hexB) {
 export const defaultDisplayLayout = [
   { type: 'clock', x: 0, y: 0, w: 3, h: 1 },
   { type: 'branding', x: 3, y: 0, w: 9, h: 1 },
-  { type: 'room', x: 0, y: 1, w: 12, h: 1 },
-  { type: 'status', x: 0, y: 2, w: 7, h: 4 },
-  { type: 'upcoming', x: 7, y: 2, w: 5, h: 4 },
+  { id: 'room', type: 'room', x: 0, y: 1, w: 12, h: 1 },
+  { id: 'status', type: 'status', x: 0, y: 2, w: 7, h: 4 },
+  { id: 'upcoming', type: 'upcoming', x: 7, y: 2, w: 5, h: 4 },
   { type: 'footer', x: 0, y: 6, w: 12, h: 1 }
 ];
 
@@ -84,8 +92,13 @@ export function validDisplayLayout(blocks) {
       optAlign(block.align) && optValign(block.valign)
     );
     const key = block?.id || block?.type;
+    const roomWidget = roomBlocks.includes(block?.type);
     if (!block || (!custom && !displayBlocks.includes(block.type)) || seen.has(key) ||
-        (!custom && block.id) || (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) || !widgetStyleValid || !textStyleValid ||
+        (custom && (!block.id || !/^layer_[a-zA-Z0-9_-]{1,58}$/.test(block.id))) ||
+        (roomWidget && !/^[a-zA-Z0-9_-]{1,64}$/.test(block.id || '')) ||
+        (!custom && !roomWidget && block.id) ||
+        (roomWidget && block.roomId !== undefined && (!Number.isSafeInteger(block.roomId) || block.roomId <= 0)) ||
+        (!roomWidget && block.roomId !== undefined) || !widgetStyleValid || !textStyleValid ||
         ![block.x, block.y, block.w, block.h].every(Number.isSafeInteger) ||
         block.x < 0 || block.y < 0 || block.w < 1 || block.h < 1 ||
         block.x + block.w > 12 || block.y + block.h > 24) return false;

@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte';
   import Banner from './Banner.svelte';
   import DisplayCanvas from './DisplayCanvas.svelte';
-  import { contrastRatio, displayBlocks, defaultDisplayLayout, validDisplayLayout, widgetParts } from './display-layout.js';
+  import { blockKey, contrastRatio, displayBlocks, roomBlocks, defaultDisplayLayout, hasInvalidRoomAssignment, validDisplayLayout, widgetParts } from './display-layout.js';
   const widgetIcons = { clock:'clock', branding:'brand', room:'rooms', status:'check-circle', upcoming:'calendar', footer:'monitor', text:'edit', rectangle:'grid' };
   const colorPresets = [
     { id: 'default', vi: 'Mặc định', en: 'Default', bgColor: '', textColor: '', accentColor: '' },
@@ -29,7 +29,7 @@
     duration: ['Thời lượng họp', 'Slot duration'],
     badge: ['Trực tuyến / Ngoại tuyến', 'Live / Offline badge']
   };
-  let { device, csrf, language = 'vi', onclose } = $props();
+  let { device, rooms = [], csrf, language = 'vi', onclose } = $props();
   const t = (vi, en) => language === 'en' ? en : vi;
   let config = $state(null), selected = $state('room'), message = $state(null), busy = $state(false), saved = $state('');
   let width = $state(''), height = $state('');
@@ -40,7 +40,7 @@
   let labels = $derived(language === 'en'
     ? { clock:'Clock & date', branding:'Organization', room:'Room name', status:'Status', upcoming:'Upcoming', footer:'Connection', text:'Text', rectangle:'Rectangle' }
     : { clock:'Giờ và ngày', branding:'Tổ chức', room:'Tên phòng', status:'Trạng thái', upcoming:'Lịch tiếp theo', footer:'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' });
-  const key = b => b.id || b.type;
+  const key = blockKey;
   let block = $derived(config?.blocks.find(b => key(b) === selected));
   let contrastWarning = $derived(block && block.bgColor && block.textColor ? (contrastRatio(block.bgColor, block.textColor) ?? 21) < 4.5 : false);
   let resolutionPending = $derived(config && (String(width || '') !== String(config.width || '') || String(height || '') !== String(config.height || '')));
@@ -68,8 +68,10 @@
   function add(type) {
     if (config.blocks.length >= 32) { setMessage('Đã đạt giới hạn 32 lớp.', 'Maximum of 32 layers reached.'); return; }
     const id = `layer_${Array.from(crypto.getRandomValues(new Uint8Array(12)), byte => byte.toString(16).padStart(2, '0')).join('')}`;
-    const layer = { id, type, x:0, y:0, w:4, h:2, ...(type === 'text' ? { text: t('Văn bản', 'Text') } : { color:'#dce5db' }) };
-    config = { ...config, blocks:[...config.blocks, layer] }; selected = id; popoverTab = 'style'; setMessage('');
+    const template = defaultDisplayLayout.find(b => b.type === type);
+    if (template && !roomBlocks.includes(type) && config.blocks.some(b => b.type === type)) { setMessage('Widget này đã có trong bố cục.', 'This widget is already in the layout.'); return; }
+    const layer = template ? { ...template, ...(roomBlocks.includes(type) ? { id } : {}), h:Math.min(template.h, config.rows || 24), y:0 } : { id, type, x:0, y:0, w:4, h:2, ...(type === 'text' ? { text: t('Văn bản', 'Text') } : { color:'#dce5db' }) };
+    config = { ...config, blocks:[...config.blocks, layer] }; selected = key(layer); popoverTab = 'style'; setMessage('');
   }
   function reorder(delta) {
     const blocks = [...config.blocks], index = blocks.findIndex(b => key(b) === selected), next = index + delta;
@@ -77,7 +79,7 @@
     [blocks[index], blocks[next]] = [blocks[next], blocks[index]]; config = { ...config, blocks };
   }
   function removeSelectedLayer() {
-    if (!block?.id) return;
+    if (!block) return;
     if (!window.confirm(t('Xóa lớp này?', 'Delete this layer?'))) return;
     config = { ...config, blocks:config.blocks.filter(b => key(b) !== selected) };
     selected = config.blocks.length ? key(config.blocks[0]) : '';
@@ -132,17 +134,9 @@
     config = { ...config, width:w, height:h, rows:config.rows || Math.max(7, ...config.blocks.map(b => b.y + b.h)) };
     setMessage('');
   }
-  function toggle(type, checked) {
-    if (!checked) { if (selected === type) popoverOpen = false; config = { ...config, blocks:config.blocks.filter(b => b.type !== type) }; if (selected === type) selected = config.blocks.length ? key(config.blocks[0]) : ''; return; }
-    const original = defaultDisplayLayout.find(b => b.type === type);
-    for (let y = 0; y <= (config.rows || 24) - original.h; y++) for (let x = 0; x <= 12 - original.w; x++) {
-      const blocks = [...config.blocks, { ...original, x, y }];
-      if (validDisplayLayout(blocks)) { config = { ...config, blocks }; selected = type; setMessage(''); return; }
-    }
-    setMessage('Không còn đủ chỗ cho khối này.', 'Not enough space left for this block.');
-  }
   async function save() {
     if (resolutionPending) { setMessage('Áp dụng độ phân giải trước khi lưu.', 'Apply resolution before saving.', 'warning'); return; }
+    if (hasInvalidRoomAssignment(config.blocks, rooms, JSON.parse(saved).blocks)) { setMessage('Chọn phòng đang hoạt động hoặc bỏ chọn phòng không khả dụng.', 'Select an active room or clear the unavailable room.', 'warning'); return; }
     busy = true; setMessage('');
     try {
       const submitted = JSON.stringify(config);
@@ -206,7 +200,7 @@
         {#if config.width}
           <p class="stage-hint">{t('Thu phóng không thay đổi bố cục đã lưu. Khi phóng lớn, cuộn ngang để xem toàn bộ chiều rộng.', 'Zoom does not affect the saved layout. When zoomed in, scroll horizontally to view full width.')}</p>
         {/if}
-        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={device.language || language} data={{room:t('Phòng họp', 'Meeting room'), entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}]}} status="Trống" scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} oninspect={(type, point) => openPopover(type, point)} />
+        <DisplayCanvas {config} {zoomMode} {zoom} {selected} language={device.language || language} data={{ rooms:Object.fromEntries(rooms.map(room => [room.id, { room:room.name, entries:[{starts:Math.floor(Date.now()/1000)+3600,ends:Math.floor(Date.now()/1000)+5400}], unavailable:!room.active }])) }} statuses={Object.fromEntries(rooms.map(room => [room.id, room.active ? 'Trống' : 'Không xác định']))} scheduleNow={Math.floor(Date.now()/1000)} editing onmove={move} onresize={(type,updates) => replace(type,updates)} onselect={(type) => selected = type} oninspect={(type, point) => openPopover(type, point)} />
       </div>
 
       <aside class="inspector">
@@ -214,11 +208,10 @@
           <legend>{t('Widget hiển thị', 'Display widgets')}</legend>
           <div class="toggle-grid">
             {#each displayBlocks as type}
-              <label class="toggle-chip">
-                <input type="checkbox" checked={config.blocks.some(b => b.type === type)} onchange={(e) => toggle(type,e.currentTarget.checked)} />
+              <button class="secondary" type="button" disabled={config.blocks.length >= 32} onclick={() => add(type)}>
                 <Icon name={widgetIcons[type]} />
-                <span>{labels[type]}</span>
-              </label>
+                <span>+ {labels[type]}</span>
+              </button>
             {/each}
           </div>
         </fieldset>
@@ -258,9 +251,7 @@
           <div class="layer-bar">
             <button class="secondary" type="button" disabled={!block} onclick={() => reorder(1)}>{t('Lên trước', 'Forward')}</button>
             <button class="secondary" type="button" disabled={!block} onclick={() => reorder(-1)}>{t('Ra sau', 'Backward')}</button>
-            {#if block?.id}
-              <button class="danger" type="button" onclick={removeSelectedLayer}>{t('Xóa', 'Delete')}</button>
-            {/if}
+            <button class="danger" type="button" disabled={!block} onclick={removeSelectedLayer}>{t('Xóa', 'Delete')}</button>
           </div>
         </fieldset>
 
@@ -294,7 +285,7 @@
 
         <div class="inspector-actions">
           <button type="button" disabled={busy} onclick={save}>{busy ? t('Đang lưu…', 'Saving…') : t('Lưu thiết kế', 'Save layout')}</button>
-          <button class="secondary" type="button" onclick={() => { if (window.confirm(t('Thay bố cục hiện tại bằng mẫu mặc định?', 'Replace current layout with default template?'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; popoverOpen = false; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
+          <button class="secondary" type="button" onclick={() => { if (window.confirm(t('Thay bố cục hiện tại bằng mẫu mặc định? Các lựa chọn phòng sẽ bị xóa và cần chọn lại.', 'Replace current layout with default template? Room selections will be cleared and must be selected again.'))) { config = { ...config, blocks:defaultDisplayLayout.map(b => ({ ...b })) }; selected = 'room'; popoverOpen = false; setMessage(''); } }}>{t('Dùng mẫu mặc định', 'Use default layout')}</button>
           <a class="public-link" href={`/display/${device.public_id}`} target="_blank" rel="noreferrer">{t('Mở màn hình công khai', 'Open public display')} ↗</a>
         </div>
       </aside>
@@ -320,9 +311,7 @@
         <div class="popover-head-actions">
           <button type="button" class="icon-mini-btn" title={t('Đưa lên trước', 'Bring forward')} aria-label={t('Đưa lên trước', 'Bring forward')} onclick={() => reorder(1)}>↑</button>
           <button type="button" class="icon-mini-btn" title={t('Đưa ra sau', 'Send backward')} aria-label={t('Đưa ra sau', 'Send backward')} onclick={() => reorder(-1)}>↓</button>
-          {#if block.id}
-            <button type="button" class="icon-mini-btn is-danger" title={t('Xóa lớp', 'Delete layer')} aria-label={t('Xóa lớp', 'Delete layer')} onclick={removeSelectedLayer}>🗑</button>
-          {/if}
+          <button type="button" class="icon-mini-btn is-danger" title={t('Xóa lớp', 'Delete layer')} aria-label={t('Xóa lớp', 'Delete layer')} onclick={removeSelectedLayer}>×</button>
           <button type="button" class="icon-mini-btn" aria-label={t('Đóng thuộc tính', 'Close properties')} onclick={() => closePopover(true)}>×</button>
         </div>
       </header>
@@ -345,6 +334,19 @@
 
       <div class="popover-body">
         {#if displayBlocks.includes(block.type)}
+          {#if roomBlocks.includes(block.type)}
+            <label>{t('Phòng của widget', 'Widget room')}
+              <select value={block.roomId || ''} onchange={(e) => replace(selected, { roomId: e.currentTarget.value ? Number(e.currentTarget.value) : undefined })}>
+                <option value="">{t('Chọn phòng', 'Select room')}</option>
+                {#if block.roomId && !rooms.some(room => room.id === block.roomId && room.active)}
+                  <option value={String(block.roomId)} disabled>{rooms.find(room => room.id === block.roomId)?.name || `#${block.roomId}`} — {t('Không khả dụng', 'Unavailable')}</option>
+                {/if}
+                {#each rooms.filter(room => room.active) as room}
+                  <option value={String(room.id)}>{room.name}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
           {#if popoverTab === 'style'}
             <div class="prop-group">
               <span class="prop-label">{t('Bảng màu nhanh', 'Color presets')}</span>

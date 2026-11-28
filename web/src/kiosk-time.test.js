@@ -1,6 +1,8 @@
 import { strict as assert } from 'node:assert';
-import { statusAt } from './kiosk-time.js';
+import { roomStatuses, statusAt } from './kiosk-time.js';
 const data = {entries:[{starts:100, ends:200}]};
+assert.deepEqual(roomStatuses({ 1: data, 2: { entries: [] }, 3: { entries: [], unavailable: true }, 4: { entries: [], valid_until: 101 } }, 2000, 2000, 100), { 1: 'Đang họp', 2: 'Trống', 3: 'Không xác định', 4: 'Không xác định' });
+assert.deepEqual(roomStatuses(null, 0, 0, 100), {});
 assert.equal(statusAt(null, 0, 0, 100), 'Không xác định');
 assert.equal(statusAt({entries:[{starts:103,ends:200}]}, 0, 0, 100, 5000), 'Không xác định');
 assert.equal(statusAt({entries:[],valid_until:103}, 0, 0, 100, 5000), 'Không xác định');

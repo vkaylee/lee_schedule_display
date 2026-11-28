@@ -442,7 +442,7 @@ func TestMigration11PreservesOccurrencesAndRollsBack(t *testing.T) {
 				if err = migrate(db); err != nil {
 					t.Fatal(err)
 				}
-			} else if version != 16 {
+			} else if version != 17 {
 				t.Fatalf("version %d", version)
 			}
 			var originals int
@@ -479,7 +479,7 @@ func TestOfficialMigrationPreservesPublicID(t *testing.T) {
 			}
 			var id string
 			var version, horizon, original int
-			if err = db.QueryRow("SELECT devices.public_id,(SELECT user_version FROM pragma_user_version),booking_series.checked_through,series_occurrences.original_starts FROM devices,booking_series,series_occurrences").Scan(&id, &version, &horizon, &original); err != nil || len(id) != 32 || version != 16 || horizon != 200 || original != 100 || (v == 11 && id != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
+			if err = db.QueryRow("SELECT devices.public_id,(SELECT user_version FROM pragma_user_version),booking_series.checked_through,series_occurrences.original_starts FROM devices,booking_series,series_occurrences").Scan(&id, &version, &horizon, &original); err != nil || len(id) != 32 || version != 17 || horizon != 200 || original != 100 || (v == 11 && id != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") {
 				t.Fatalf("id=%s version=%d horizon=%d original=%d error=%v", id, version, horizon, original, err)
 			}
 		})
