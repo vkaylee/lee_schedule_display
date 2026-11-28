@@ -246,7 +246,7 @@ func registerDeviceHandlers(mux *http.ServeMux, db *sql.DB, post func(http.Handl
 		}
 		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 		d.DisallowUnknownFields()
-		if err != nil || id <= 0 || d.Decode(&input) != nil || d.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en") {
+		if err != nil || id <= 0 || d.Decode(&input) != nil || d.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en" && input.Language != "zh-CN") {
 			http.Error(w, "invalid request", 400)
 			return
 		}

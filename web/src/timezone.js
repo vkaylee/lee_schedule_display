@@ -75,7 +75,11 @@ export function formatDuration(minutes, language = 'vi') {
   const h = Math.floor((total % 1440) / 60);
   const m = total % 60;
   const parts = [];
-  if (language === 'en') {
+  if (language === 'zh-CN') {
+    if (d > 0) parts.push(`${d} 天`);
+    if (h > 0) parts.push(`${h} 小时`);
+    if (m > 0) parts.push(`${m} 分钟`);
+  } else if (language === 'en') {
     if (d > 0) parts.push(`${d}d`);
     if (h > 0) parts.push(`${h} hr`);
     if (m > 0) parts.push(`${m} min`);

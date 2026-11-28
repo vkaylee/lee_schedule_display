@@ -5,8 +5,9 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import Modal from './Modal.svelte';
   let confirmDialog = $state();
+  import { translate } from './i18n.js';
   let { csrf, language = 'vi' } = $props();
-  const t = (vi, en) => language === 'en' ? en : vi;
+  const t = (vi, en) => translate(vi, en, language);
   let rooms = $state([]);
   let loading = $state(true);
   let busy = $state(false);

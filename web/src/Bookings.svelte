@@ -6,8 +6,9 @@
   import Modal from './Modal.svelte';
   let confirmDialog = $state();
   import { localTime, localTimeSeconds, instant, addMinutesLocal, diffMinutesLocal, defaultBookingRange, formatDuration } from './timezone.js';
+  import { translate } from './i18n.js';
   let { csrf, language = 'vi' } = $props();
-  const t = (vi, en) => language === 'en' ? en : vi;
+  const t = (vi, en) => translate(vi, en, language);
   const DURATION_PRESETS = [
     { minutes: 15, vi: '15p', en: '15m' },
     { minutes: 30, vi: '30p', en: '30m' },
@@ -354,7 +355,7 @@
             aria-pressed={durationMinutes === preset.minutes}
             onclick={() => applyDurationPreset(preset.minutes)}
           >
-            {language === 'en' ? preset.en : preset.vi}
+            {language === 'zh-CN' ? formatDuration(preset.minutes, language) : language === 'en' ? preset.en : preset.vi}
           </button>
         {/each}
       </div>

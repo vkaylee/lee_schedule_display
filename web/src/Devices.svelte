@@ -7,8 +7,9 @@
   import DisplayEditor from './DisplayEditor.svelte';
   let confirmDialog = $state();
   let editing = $state(null);
+  import { translate } from './i18n.js';
   let { csrf, language = 'vi' } = $props();
-  const t = (vi, en) => language === 'en' ? en : vi;
+  const t = (vi, en) => translate(vi, en, language);
   let devices = $state([]), rooms = $state([]), loading = $state(true), name = $state(''), error = $state(''), busy = $state(false);
   let createModalOpen = $state(false), createError = $state(''), cloneSource = $state(null), renameTarget = $state(null);
   async function load() {
@@ -172,6 +173,7 @@
                   <select value={device.language} disabled={busy} onchange={(event) => setLanguage(device, event)}>
                     <option value="vi">Tiếng Việt</option>
                     <option value="en">English</option>
+                    <option value="zh-CN">简体中文</option>
                   </select>
                 </label>
 

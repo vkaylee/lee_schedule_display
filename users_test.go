@@ -73,10 +73,10 @@ func TestUserManagement(t *testing.T) {
 	if w := request("PUT", "/api/session/language", `{"language":"fr"}`, cookie, session.CSRF); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
-	if w := request("PUT", "/api/session/language", `{"language":"en"}`, cookie, session.CSRF); w.Code != 204 {
+	if w := request("PUT", "/api/session/language", `{"language":"zh-CN"}`, cookie, session.CSRF); w.Code != 204 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w := request("GET", "/api/session", "", cookie, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
+	if w := request("GET", "/api/session", "", cookie, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"zh-CN"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if w := request("POST", "/api/users", `{"username":"other","password":"long-password-456"}`, cookie, "wrong"); w.Code != 403 {

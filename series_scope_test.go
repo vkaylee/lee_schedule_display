@@ -66,7 +66,7 @@ func TestCurrentSeriesSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 19 {
+	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 20 {
 		t.Fatalf("version=%d err=%v", version, err)
 	}
 	for _, stmt := range []string{

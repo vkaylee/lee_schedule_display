@@ -253,7 +253,7 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if forbidden.Code != 403 {
 		t.Fatal(forbidden.Code)
 	}
-	if w = request("PUT", "/api/devices/1/language", `{"language":"en"}`, true, ""); w.Code != 204 {
+	if w = request("PUT", "/api/devices/1/language", `{"language":"zh-CN"}`, true, ""); w.Code != 204 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	badOrigin := httptest.NewRequest("PUT", "https://example.test/api/devices/1/language", strings.NewReader(`{"language":"vi"}`))
@@ -265,10 +265,10 @@ func TestDeviceRoomPrivacyAndRevocation(t *testing.T) {
 	if forbidden.Code != 403 {
 		t.Fatal(forbidden.Code)
 	}
-	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
+	if w = request("GET", "/api/display/"+publicID, "", false, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"zh-CN"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if w = request("GET", "/api/devices", "", true, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"en"`) {
+	if w = request("GET", "/api/devices", "", true, ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"language":"zh-CN"`) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	w = request("GET", "/api/display/"+publicID, "", false, "")

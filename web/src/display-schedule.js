@@ -18,6 +18,12 @@ export function displaySchedule(entries, now, validUntil = null) {
 
 export function formatDuration(seconds, language = 'vi') {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (language === 'zh-CN') {
+    if (seconds < 60) return '不到 1 分钟';
+    const total = Math.round(seconds / 60);
+    const days = Math.floor(total / 1440), hours = Math.floor(total % 1440 / 60), minutes = total % 60;
+    return [days && `${days} 天`, hours && `${hours} 小时`, minutes && `${minutes} 分钟`].filter(Boolean).join(' ');
+  }
   if (seconds < 60) return language === 'en' ? '< 1 min' : 'Dưới 1 phút';
   const totalMinutes = Math.round(seconds / 60);
   const days = Math.floor(totalMinutes / 1440);

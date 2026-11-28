@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, tick } from 'svelte';
+  import { translate } from './i18n.js';
 
   export let language = 'vi';
   let dialog;
@@ -44,8 +45,8 @@
   <form method="dialog">
     <p>{message}</p>
     <div class="actions">
-      <button bind:this={cancelButton} class="secondary" value="cancel">{language === 'en' ? 'Cancel' : 'Hủy'}</button>
-      <button value="confirm">{language === 'en' ? 'Confirm' : 'Xác nhận'}</button>
+      <button bind:this={cancelButton} class="secondary" value="cancel">{translate('Hủy', 'Cancel', language)}</button>
+      <button value="confirm">{translate('Xác nhận', 'Confirm', language)}</button>
     </div>
   </form>
 </dialog>

@@ -5,6 +5,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   let confirmDialog = $state();
   import DisplayCanvas from './DisplayCanvas.svelte';
+  import { translate } from './i18n.js';
   import { blockKey, contrastRatio, displayBlocks, roomBlocks, defaultDisplayLayout, hasInvalidRoomAssignment, validDisplayLayout, widgetParts } from './display-layout.js';
   const widgetIcons = { clock:'clock', branding:'brand', room:'rooms', status:'check-circle', upcoming:'calendar', footer:'monitor', text:'edit', rectangle:'grid' };
   const colorPresets = [
@@ -34,16 +35,14 @@
     badge: ['Trực tuyến / Ngoại tuyến', 'Live / Offline badge']
   };
   let { device, rooms = [], csrf, language = 'vi', onclose } = $props();
-  const t = (vi, en) => language === 'en' ? en : vi;
+  const t = (vi, en) => translate(vi, en, language);
   let config = $state(null), selected = $state('room'), message = $state(null), busy = $state(false), saved = $state('');
   let width = $state(''), height = $state('');
   let zoomMode = $state('width'), zoom = $state(1);
   let popoverOpen = $state(false), popoverPos = $state({ x: 16, y: 16 }), popoverTab = $state('style');
   let popoverEl = $state(null);
   let lastTrigger = null;
-  let labels = $derived(language === 'en'
-    ? { clock:'Clock & date', branding:'Organization', room:'Room name', status:'Status', upcoming:'Upcoming', footer:'Connection', text:'Text', rectangle:'Rectangle' }
-    : { clock:'Giờ và ngày', branding:'Tổ chức', room:'Tên phòng', status:'Trạng thái', upcoming:'Lịch tiếp theo', footer:'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' });
+  let labels = $derived(Object.fromEntries(Object.entries({ clock:['Giờ và ngày','Clock & date'], branding:['Tổ chức','Organization'], room:['Tên phòng','Room name'], status:['Trạng thái','Status'], upcoming:['Lịch tiếp theo','Upcoming'], footer:['Kết nối','Connection'], text:['Chữ','Text'], rectangle:['Hình chữ nhật','Rectangle'] }).map(([key, values]) => [key, t(...values)])));
   const key = blockKey;
   let block = $derived(config?.blocks.find(b => key(b) === selected));
   let contrastWarning = $derived(block && block.bgColor && block.textColor ? (contrastRatio(block.bgColor, block.textColor) ?? 21) < 4.5 : false);
@@ -51,7 +50,13 @@
   let dirty = $derived(config && (resolutionPending || JSON.stringify(config) !== saved));
   let previewLanguage = $derived(device.language || language);
   let previewNow = $derived(Math.floor(Date.now() / 1000));
-  let previewEntries = $derived(previewLanguage === 'en'
+  let previewEntries = $derived(previewLanguage === 'zh-CN'
+    ? [
+        { starts: previewNow - 900, ends: previewNow + 1800, title: '每周产品例会', organizer: '张伟' },
+        { starts: previewNow + 3600, ends: previewNow + 5400, title: '第四季度设计评审', organizer: '李娜' },
+        { starts: previewNow + 7200, ends: previewNow + 9000, private: true }
+      ]
+    : previewLanguage === 'en'
     ? [
         { starts: previewNow - 900, ends: previewNow + 1800, title: 'Weekly Product Sync', organizer: 'Minh Nguyen' },
         { starts: previewNow + 3600, ends: previewNow + 5400, title: 'Design Review Q4', organizer: 'Lan Tran' },
@@ -473,13 +478,13 @@
                   <option value="bottom">{t('Dưới', 'Bottom')}</option>
                 </select>
               </label>
-              <label>Padding (px)
+              <label>{t('Khoảng đệm (px)', 'Padding (px)')}
                 <input type="number" min="0" max="128" step="2" value={block.padding ?? 0} onchange={(e) => replace(selected, { padding: Number(e.currentTarget.value) })} />
               </label>
             </div>
             <div class="coordinates">
               {#each ['x','y','w','h'] as field}
-                <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
+                <label>{({ x:t('Cột','Col'), y:t('Hàng','Row'), w:t('Rộng','Width'), h:t('Cao','Height') })[field]}
                   <input type="number" min={field === 'x' || field === 'y' ? 0 : 1} max={field === 'x' || field === 'w' ? 12 : 24} value={block[field]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [field]:Number(input.value) }); input.value = String(config.blocks.find(b => key(b) === selected)[field]); }} />
                 </label>
               {/each}
@@ -512,8 +517,8 @@
             </div>
           {:else}
             <div class="grid-2">
-              <label>Padding (px) <input type="number" min="0" max="128" value={block.padding ?? 16} onchange={(e) => replace(selected, { padding:Number(e.currentTarget.value) })} /></label>
-              <label>Margin (px) <input type="number" min="0" max="128" value={block.margin ?? 0} onchange={(e) => replace(selected, { margin:Number(e.currentTarget.value) })} /></label>
+              <label>{t('Khoảng đệm (px)', 'Padding (px)')} <input type="number" min="0" max="128" value={block.padding ?? 16} onchange={(e) => replace(selected, { padding:Number(e.currentTarget.value) })} /></label>
+              <label>{t('Lề (px)', 'Margin (px)')} <input type="number" min="0" max="128" value={block.margin ?? 0} onchange={(e) => replace(selected, { margin:Number(e.currentTarget.value) })} /></label>
             </div>
             <div class="grid-2">
               <label>{t('Căn ngang', 'Horizontal align')}
@@ -529,7 +534,7 @@
             </div>
             <div class="coordinates">
               {#each ['x','y','w','h'] as field}
-                <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
+                <label>{({ x:t('Cột','Col'), y:t('Hàng','Row'), w:t('Rộng','Width'), h:t('Cao','Height') })[field]}
                   <input type="number" min={field === 'x' || field === 'y' ? 0 : 1} max={field === 'x' || field === 'w' ? 12 : 24} value={block[field]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [field]:Number(input.value) }); input.value = String(config.blocks.find(b => key(b) === selected)[field]); }} />
                 </label>
               {/each}
@@ -539,7 +544,7 @@
           <label class="color-row">{t('Màu nền', 'Fill color')} <input type="color" value={block.color || '#dce5db'} oninput={(e) => replace(selected, { color:e.currentTarget.value })} /></label>
           <div class="coordinates">
             {#each ['x','y','w','h'] as field}
-              <label>{(language === 'en' ? {x:'Col',y:'Row',w:'Width',h:'Height'} : {x:'Cột',y:'Hàng',w:'Rộng',h:'Cao'})[field]}
+              <label>{({ x:t('Cột','Col'), y:t('Hàng','Row'), w:t('Rộng','Width'), h:t('Cao','Height') })[field]}
                 <input type="number" min={field === 'x' || field === 'y' ? 0 : 1} max={field === 'x' || field === 'w' ? 12 : 24} value={block[field]} onchange={(e) => { const input = e.currentTarget; replace(selected, { [field]:Number(input.value) }); input.value = String(config.blocks.find(b => key(b) === selected)[field]); }} />
               </label>
             {/each}

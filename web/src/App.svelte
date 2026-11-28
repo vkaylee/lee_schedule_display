@@ -9,10 +9,12 @@
   import Bookings from './Bookings.svelte';
   import Devices from './Devices.svelte';
   import PublicDisplay from './PublicDisplay.svelte';
+  import { translate } from './i18n.js';
   const displayMatch = window.location.pathname.match(/^\/display\/([0-9a-f]{32})$/);
 
   let t;
-  $: t = session?.language === 'en' ? (_vi, en) => en : (vi, _en) => vi;
+  $: t = (vi, en) => translate(vi, en, session?.language || 'vi');
+  $: if (typeof document !== 'undefined') document.documentElement.lang = session?.language || 'vi';
   let username = '';
   let password = '';
   let showPassword = false;
@@ -336,10 +338,11 @@
             <Icon name="user" />
             <span class="account-name">{session.username}</span>
           </span>
-          <label class="sr-only" for="account-language">Ngôn ngữ / Language</label>
-          <select id="account-language" value={session.language} onchange={changeLanguage} disabled={busy} aria-label="Ngôn ngữ / Language">
-            <option value="vi">Tiếng Việt</option>
+          <label class="sr-only" for="account-language">{t('Ngôn ngữ', 'Language')}</label>
+          <select id="account-language" value={session.language} onchange={changeLanguage} disabled={busy} aria-label={t('Ngôn ngữ', 'Language')}>
+            <option value="vi">{t('Tiếng Việt', 'Vietnamese')}</option>
             <option value="en">English</option>
+            <option value="zh-CN">{t('简体中文', 'Chinese (Simplified)')}</option>
           </select>
           <button class="topbar-logout" type="button" onclick={logout} disabled={busy}>
             <Icon name="logout" />

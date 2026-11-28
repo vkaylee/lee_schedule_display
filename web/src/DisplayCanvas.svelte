@@ -2,11 +2,12 @@
   import Icon from './Icon.svelte';
   import { displaySchedule, formatDuration, formatScheduleDateTime, meetingProgress } from './display-schedule.js';
   import { canvasScale, gridCell, hexColorRe, moveBlock, resizeEdges } from './display-layout.js';
+  import { translate } from './i18n.js';
 
   let { config, data, statuses = {}, zone = 'UTC', clock = new Date(), scheduleNow = null, language = 'vi', editing = false, selected = '', zoomMode = 'width', zoom = 1, onmove = () => {}, onresize = () => {}, onselect = () => {}, oninspect = () => {} } = $props();
 
-  const t = (vi, en) => language === 'en' ? en : vi;
-  let locale = $derived(language === 'en' ? 'en-US' : 'vi-VN');
+  const t = (vi, en) => translate(vi, en, language);
+  let locale = $derived(language === 'en' ? 'en-US' : language === 'zh-CN' ? 'zh-CN' : 'vi-VN');
   let viewportWidth = $state(0), windowHeight = $state(0);
   let resizeStart = null;
   let dragging = $state(null);
@@ -16,9 +17,7 @@
   let rowCount = $derived(config.rows || Math.max(7, ...config.blocks.map(block => block.y + block.h)));
   let scale = $derived(canvasScale(config.width, config.height, viewportWidth, editing ? Math.max(280, windowHeight * 0.7) : windowHeight, editing ? zoomMode : 'fit', editing ? zoom : 1));
 
-  let labels = $derived(language === 'en'
-    ? { clock: 'Clock & date', branding: 'Organization', room: 'Room name', status: 'Status', upcoming: 'Upcoming', footer: 'Connection', text:'Text', rectangle:'Rectangle' }
-    : { clock: 'Giờ và ngày', branding: 'Tổ chức', room: 'Tên phòng', status: 'Trạng thái', upcoming: 'Lịch tiếp theo', footer: 'Kết nối', text:'Chữ', rectangle:'Hình chữ nhật' });
+  let labels = $derived(Object.fromEntries(Object.entries({ clock: ['Giờ và ngày', 'Clock & date'], branding: ['Tổ chức', 'Organization'], room: ['Tên phòng', 'Room name'], status: ['Trạng thái', 'Status'], upcoming: ['Lịch tiếp theo', 'Upcoming'], footer: ['Kết nối', 'Connection'], text: ['Chữ', 'Text'], rectangle: ['Hình chữ nhật', 'Rectangle'] }).map(([key, values]) => [key, t(...values)])));
 
   const key = block => block.id || block.type;
   const hasPart = (block, part) => !block.hideParts?.includes(part);
@@ -160,7 +159,7 @@
   {#each config.blocks as block (key(block))}
     {@const roomData = data?.rooms?.[block.roomId]}
     {@const status = statuses[block.roomId] || 'Không xác định'}
-    {@const statusText = language === 'en' ? ({ 'Không xác định':'Unknown', 'Đang họp':'In meeting', 'Trống':'Available' }[status] || status) : status}
+    {@const statusText = ({ 'Không xác định':t('Không xác định', 'Unknown'), 'Đang họp':t('Đang họp', 'In meeting'), 'Trống':t('Trống', 'Available') }[status] || status)}
     {@const schedule = displaySchedule(roomData?.entries || [], scheduleNow ?? 0, roomData?.valid_until)}
     {@const progress = status === 'Đang họp' && scheduleNow !== null ? meetingProgress(schedule.current, scheduleNow) : 0}
     {#if editing && dragPreview?.key === key(block) && (dragPreview.x !== dragging.block.x || dragPreview.y !== dragging.block.y)}<div class="drag-origin" aria-hidden="true" style={`grid-column:${dragging.block.x + 1} / span ${block.w};grid-row:${dragging.block.y + 1} / span ${block.h}`}></div>{/if}

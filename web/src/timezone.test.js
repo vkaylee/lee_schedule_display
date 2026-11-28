@@ -40,4 +40,5 @@ assert.deepEqual(defaultBookingRange('Asia/Ho_Chi_Minh', Date.parse('2026-11-28T
 assert.equal(formatDuration(45, 'vi'), '45 phút');
 assert.equal(formatDuration(90, 'vi'), '1 giờ 30 phút');
 assert.equal(formatDuration(90, 'en'), '1 hr 30 min');
+assert.equal(formatDuration(1530, 'zh-CN'), '1 天 1 小时 30 分钟');
 assert.equal(formatDuration(0, 'vi'), '');

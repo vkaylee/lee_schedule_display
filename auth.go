@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,17 +26,60 @@ const passwordIterations = 600000
 const sessionDuration = 12 * time.Hour
 
 func migrate(db *sql.DB) error {
-	tx, err := db.Begin()
+	return migrateContext(context.Background(), db)
+}
+
+func migrateContext(ctx context.Context, db *sql.DB) (resultErr error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var foreignKeys int
+	if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return err
+	}
+	if foreignKeys != 0 {
+		defer func() {
+			if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys=ON"); err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("restore foreign keys: %w", err))
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
+		}()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var version int
-	if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version != 0 && version != 19 {
-		return errors.New("unsupported database version: create a new empty database")
+	if version != 0 && version != 19 && version != 20 {
+		return errors.New("unsupported database version")
+	}
+	if version == 19 {
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE users_migration (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en','zh-CN')));
+INSERT INTO users_migration SELECT id,username,salt,password_hash,active,language FROM users;
+DROP TABLE users;
+ALTER TABLE users_migration RENAME TO users;`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE devices_migration (id INTEGER PRIMARY KEY, name TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en','zh-CN')), display_config TEXT NOT NULL DEFAULT '', public_id TEXT NOT NULL DEFAULT '');
+INSERT INTO devices_migration SELECT id,name,revoked,language,display_config,public_id FROM devices;
+DROP TABLE devices;
+ALTER TABLE devices_migration RENAME TO devices;
+CREATE UNIQUE INDEX devices_public_id ON devices(public_id) WHERE public_id<>'';`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=20"); err != nil {
+			return err
+		}
+		version = 20
 	}
 	if version == 0 {
 		var objects int
@@ -44,14 +89,14 @@ func migrate(db *sql.DB) error {
 		if objects != 0 {
 			return errors.New("database is not empty: create a new empty database")
 		}
-		if _, err := tx.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en')));
+		if _, err := tx.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, salt BLOB NOT NULL, password_hash BLOB NOT NULL, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en','zh-CN')));
 CREATE TABLE sessions (token_hash BLOB PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE account_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, target_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE rooms (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)), show_title INTEGER NOT NULL DEFAULT 0 CHECK (show_title IN (0,1)), show_organizer INTEGER NOT NULL DEFAULT 0 CHECK (show_organizer IN (0,1)));
 CREATE TABLE bookings (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), version INTEGER NOT NULL DEFAULT 1);
 CREATE INDEX bookings_room_time ON bookings(room_id, starts, ends) WHERE canceled = 0;
 CREATE TABLE booking_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, booking_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE devices (id INTEGER PRIMARY KEY, name TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en')), display_config TEXT NOT NULL DEFAULT '', public_id TEXT NOT NULL DEFAULT '');
+CREATE TABLE devices (id INTEGER PRIMARY KEY, name TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), language TEXT NOT NULL DEFAULT 'vi' CHECK(language IN ('vi','en','zh-CN')), display_config TEXT NOT NULL DEFAULT '', public_id TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX devices_public_id ON devices(public_id) WHERE public_id<>'';
 CREATE TABLE booking_series (id INTEGER PRIMARY KEY, room_id INTEGER NOT NULL REFERENCES rooms(id), title TEXT NOT NULL, organizer TEXT NOT NULL, private INTEGER NOT NULL CHECK(private IN (0,1)), rule TEXT NOT NULL, actor_id INTEGER NOT NULL REFERENCES users(id), checked_through INTEGER, version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)));
 CREATE TABLE series_occurrences (series_id INTEGER NOT NULL REFERENCES booking_series(id), original_starts INTEGER NOT NULL, starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends > starts), version INTEGER NOT NULL DEFAULT 1, canceled INTEGER NOT NULL DEFAULT 0 CHECK(canceled IN (0,1)), room_id INTEGER REFERENCES rooms(id), title TEXT, organizer TEXT, private INTEGER CHECK(private IN (0,1)), PRIMARY KEY(series_id,original_starts));
@@ -63,7 +108,7 @@ INSERT INTO conflict_scan_status(id) VALUES(1);
 CREATE TABLE room_scan_status(room_id INTEGER PRIMARY KEY REFERENCES rooms(id),last_success INTEGER,checked_from INTEGER,checked_through INTEGER,attempt INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0 CHECK(failed IN (0,1)));
 CREATE TABLE materialization_coverage(series_id INTEGER PRIMARY KEY REFERENCES booking_series(id), starts INTEGER NOT NULL, ends INTEGER NOT NULL CHECK(ends>starts));
 CREATE TABLE series_audit (id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, series_id INTEGER NOT NULL, action TEXT NOT NULL, created_at INTEGER NOT NULL);
-PRAGMA user_version=19`); err != nil {
+PRAGMA user_version=20`); err != nil {
 			return err
 		}
 	}
@@ -92,6 +137,23 @@ PRAGMA user_version=19`); err != nil {
 	}
 	if !compatible {
 		return errors.New("unsupported or incomplete database schema")
+	}
+	if version == 19 || version == 20 {
+		rows, err := tx.Query("PRAGMA foreign_key_check")
+		if err != nil {
+			return err
+		}
+		if rows.Next() {
+			rows.Close()
+			return errors.New("database migration left foreign key violations")
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -347,7 +409,7 @@ func authHandler(db *sql.DB, origin string, trustedProxy netip.Addr, timezone *t
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en") {
+		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || (input.Language != "vi" && input.Language != "en" && input.Language != "zh-CN") {
 			http.Error(w, "invalid request", 400)
 			return
 		}

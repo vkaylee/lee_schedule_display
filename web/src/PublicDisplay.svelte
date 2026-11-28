@@ -4,9 +4,10 @@
   import { roomStatuses } from './kiosk-time.js';
   import DisplayCanvas from './DisplayCanvas.svelte';
   import { defaultDisplayLayout } from './display-layout.js';
+  import { translate } from './i18n.js';
   let { id } = $props();
   let data = $state(null), config = $state({ organization:'', logo:'', blocks:defaultDisplayLayout }), zone = $state('UTC'), statuses = $state({}), clock = $state(new Date()), scheduleNow = $state(null), language = $state('vi'), error = $state('');
-  const t = (vi, en) => language === 'en' ? en : vi;
+  const t = (vi, en) => translate(vi, en, language);
   let syncClock = 0, syncWall = 0, serverNow = 0, uncertainty = 0, generation = 0, syncing = false;
   function tick() { const elapsed = performance.now() - syncClock; const wall = Date.now() - syncWall; statuses = roomStatuses(data?.rooms, elapsed, wall, serverNow, uncertainty, 30000); scheduleNow = data && elapsed >= 0 && wall >= 0 && Math.abs(elapsed - wall) <= 1000 && Math.max(elapsed, wall) + uncertainty + 30000 < 900000 ? serverNow + elapsed / 1000 : null; if (scheduleNow !== null) clock = new Date(scheduleNow * 1000); }
   async function sync() {
@@ -18,7 +19,7 @@
       const result = await response.json();
       const elapsed = performance.now() - start, wallElapsed = Date.now() - wall;
       if (current !== generation || document.hidden || elapsed < 0 || wallElapsed < 0 || Math.abs(elapsed - wallElapsed) > 1000) throw new Error();
-      data = result; config = result.config; language = result.language === 'en' ? 'en' : 'vi'; syncClock = performance.now(); syncWall = Date.now(); serverNow = result.now; uncertainty = Math.max(elapsed, wallElapsed); error = ''; tick();
+      data = result; config = result.config; language = ['en', 'zh-CN'].includes(result.language) ? result.language : 'vi'; document.documentElement.lang = language; syncClock = performance.now(); syncWall = Date.now(); serverNow = result.now; uncertainty = Math.max(elapsed, wallElapsed); error = ''; tick();
     } catch { if (current === generation) { data = null; statuses = {}; scheduleNow = null; error = ['Không thể kết nối hoặc thiết bị không còn hoạt động.', 'Connection lost or device is no longer active.']; } }
     finally { syncing = false; if (current !== generation && !document.hidden) sync(); }
   }
