@@ -47,7 +47,9 @@ leedevkit dev ps
 docker compose -p lee-schedule-display-dev port go 8080
 ```
 
-Nếu thay `APP_PORT`, đặt `APP_ORIGIN` khớp origin trình duyệt, ví dụ `http://localhost:8081`. Compose chỉ publish cổng lên loopback máy chủ; container vẫn lắng nghe trên mạng Docker, nên chỉ kết nối nó với các container tin cậy. `LISTEN_ADDR` có thể thay đổi địa chỉ lắng nghe khi chạy trực tiếp; nếu mở ra ngoài loopback, phải bảo đảm chỉ reverse proxy tin cậy truy cập được. SQLite dev nằm trong volume `dev_data`; `leedevkit dev down` giữ dữ liệu, còn `leedevkit dev clean` xóa volume và dữ liệu.
+Nếu thay `APP_PORT`, đặt `APP_ORIGIN` khớp origin trình duyệt, ví dụ `http://localhost:8081`. Compose publish cổng trên mọi interface của máy chủ; chỉ mở cổng trên mạng tin cậy. Container cũng lắng nghe trên mạng Docker, nên chỉ kết nối nó với các container tin cậy. `LISTEN_ADDR` có thể thay đổi địa chỉ lắng nghe khi chạy trực tiếp; nếu mở ra ngoài loopback, phải bảo đảm chỉ reverse proxy tin cậy truy cập được. SQLite dev nằm trong volume `dev_data`; `leedevkit dev down` giữ dữ liệu, còn `leedevkit dev clean` xóa volume và dữ liệu.
+
+Khi `ENV_DEV=true`, mỗi lần server khởi động, tài khoản `DEV_USERNAME` được tạo nếu chưa có hoặc đặt lại mật khẩu thành `DEV_PASSWORD`; các phiên của tài khoản này bị thu hồi. Tài khoản khác và dữ liệu còn lại không đổi. Compose mặc định `DEV_USERNAME=playwright-dev` và `DEV_PASSWORD` lấy từ `PLAYWRIGHT_DEV_PASSWORD` (nếu không đặt thì dùng `DevTest-2026-only`). Có thể ghi đè `DEV_USERNAME` và `DEV_PASSWORD`; mật khẩu phải có 12–1024 byte. Tài khoản đang bị vô hiệu hóa không tự kích hoạt lại. Khi chạy trực tiếp với `ENV_DEV=true`, phải đặt cả hai biến `DEV_USERNAME` và `DEV_PASSWORD`. Không bật chế độ này với dữ liệu thật hoặc trên mạng không tin cậy: mật khẩu dev mặc định đã công khai.
 
 Chạy trực tiếp ngoài container:
 

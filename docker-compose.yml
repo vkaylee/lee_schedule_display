@@ -13,6 +13,8 @@ services:
       LISTEN_ADDR: 0.0.0.0:8080
       TRUSTED_PROXY_IP: ${TRUSTED_PROXY_IP:-}
       APP_TIMEZONE: Asia/Ho_Chi_Minh
+      DEV_USERNAME: ${DEV_USERNAME:-playwright-dev}
+      DEV_PASSWORD: ${DEV_PASSWORD:-${PLAYWRIGHT_DEV_PASSWORD:-DevTest-2026-only}}
     ports:
       # Publish only on the host loopback interface.
       - "0.0.0.0:${APP_PORT:-8080}:8080"

@@ -215,6 +215,36 @@ func bootstrap(db *sql.DB, username, password string) error {
 	return nil
 }
 
+// resetDevAccount is only called with explicitly configured development credentials.
+func resetDevAccount(db *sql.DB, dev bool, username, password string) error {
+	if !dev {
+		return nil
+	}
+	if username == "" || len(username) > 128 || strings.TrimSpace(username) != username || len(password) < 12 || len(password) > 1024 {
+		return errors.New("invalid DEV_USERNAME or DEV_PASSWORD; password must have 12–1024 bytes")
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return err
+	}
+	hash, err := pbkdf2.Key(sha256.New, password, salt, passwordIterations, 32)
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`INSERT INTO users (username, salt, password_hash) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET salt=excluded.salt, password_hash=excluded.password_hash`, username, salt, hash); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func randomToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

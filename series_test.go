@@ -25,7 +25,7 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	if err = migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02')"); err != nil {
+	if _, err = db.Exec("INSERT INTO rooms(name) VALUES('room'),('long series room'); INSERT INTO users(username,salt,password_hash) VALUES('admin',X'01',X'02')"); err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("z", 43)
@@ -112,7 +112,7 @@ func TestSeriesStorageAtomicConflicts(t *testing.T) {
 	if w := post(payload, true, "csrf"); w.Code != 201 {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
-	long := fmt.Sprintf(`{"room_id":1,"title":"other","organizer":"admin","starts":%d,"duration_seconds":3600,"frequency":1,"interval":1,"count":800}`, start.Add(20*24*time.Hour+12*time.Hour).Unix())
+	long := fmt.Sprintf(`{"room_id":2,"title":"other","organizer":"admin","starts":%d,"duration_seconds":3600,"frequency":1,"interval":1,"count":800}`, start.Add(20*24*time.Hour+12*time.Hour).Unix())
 	zone, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Fatal(err)

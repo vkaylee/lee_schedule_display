@@ -158,6 +158,9 @@ func main() {
 	if !validOrigin(origin, dev) {
 		log.Fatal("APP_ORIGIN must be HTTPS or HTTP on localhost; private-network HTTP requires ENV_DEV=true")
 	}
+	if err := resetDevAccount(db, dev, os.Getenv("DEV_USERNAME"), os.Getenv("DEV_PASSWORD")); err != nil {
+		log.Fatal(err)
+	}
 	var trustedProxy netip.Addr
 	if value := os.Getenv("TRUSTED_PROXY_IP"); value != "" {
 		trustedProxy, err = netip.ParseAddr(value)
