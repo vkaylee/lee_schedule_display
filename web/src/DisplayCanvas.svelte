@@ -629,7 +629,7 @@
     color: var(--ink-primary, #182c23);
   }
   .clock-zone {
-    font-size: 0.68rem;
+    font-size: calc(0.68rem * var(--w-font-scale, 1));
     font-weight: 600;
     padding: 0.14rem 0.45rem;
     border-radius: 9999px;
@@ -667,7 +667,7 @@
     min-width: 0;
   }
   .widget-eyebrow {
-    font-size: 0.66rem;
+    font-size: calc(0.66rem * var(--w-font-scale, 1));
     font-weight: 750;
     letter-spacing: 0.13em;
     color: var(--accent, #1b6340);
@@ -733,7 +733,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.68rem;
+    font-size: calc(0.68rem * var(--w-font-scale, 1));
     font-weight: 750;
     letter-spacing: 0.13em;
     color: var(--ink-muted, #556e62);
@@ -794,7 +794,7 @@
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.72);
     border: 1px solid rgba(24, 44, 35, 0.08);
-    font-size: 0.72rem;
+    font-size: calc(0.72rem * var(--w-font-scale, 1));
     font-weight: 750;
     letter-spacing: 0.11em;
     color: var(--ink-secondary, #3b5448);
@@ -927,7 +927,7 @@
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.78);
     border: 1px solid rgba(24, 44, 35, 0.08);
-    font-size: clamp(0.74rem, 2.4cqi, 0.9rem);
+    font-size: calc(clamp(0.74rem, 2.4cqi, 0.9rem) * var(--w-font-scale, 1));
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: var(--ink-secondary, #3b5448);
@@ -949,7 +949,7 @@
     margin: 0;
     padding-top: 0.55rem;
     border-top: 1px solid rgba(24, 44, 35, 0.08);
-    font-size: clamp(0.82rem, 2.8cqi, 1rem);
+    font-size: calc(clamp(0.82rem, 2.8cqi, 1rem) * var(--w-font-scale, 1));
     font-weight: 600;
     color: var(--ink-secondary, #3b5448);
   }
@@ -966,7 +966,7 @@
     gap: 0.5rem;
   }
   .kicker {
-    font-size: clamp(0.7rem, 2.6cqi, 0.82rem);
+    font-size: calc(clamp(0.7rem, 2.6cqi, 0.82rem) * var(--w-font-scale, 1));
     font-weight: 750;
     letter-spacing: 0.12em;
     color: var(--ink-muted, #4f665a);
@@ -981,7 +981,7 @@
     background: var(--accent-soft, #e3f0e7);
     border: 1px solid var(--accent-border, #b8d5c2);
     color: var(--accent, #1b6340);
-    font-size: 0.74rem;
+    font-size: calc(0.74rem * var(--w-font-scale, 1));
     font-weight: 700;
   }
   .upcoming-list {
@@ -1037,7 +1037,7 @@
     opacity: 0.82;
   }
   .upcoming-sep {
-    font-size: 0.78rem;
+    font-size: calc(0.78rem * var(--w-font-scale, 1));
     color: var(--ink-muted, #4f665a);
     opacity: 0.65;
     flex-shrink: 0;
@@ -1112,7 +1112,7 @@
   .upcoming-relative {
     display: block;
     margin-top: 0.14rem;
-    font-size: clamp(0.7rem, 2.4cqi, 0.82rem);
+    font-size: calc(clamp(0.7rem, 2.4cqi, 0.82rem) * var(--w-font-scale, 1));
     font-weight: 600;
     color: var(--accent, #1b6340);
   }
@@ -1121,7 +1121,7 @@
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.85);
     border: 1px solid rgba(24, 44, 35, 0.08);
-    font-size: clamp(0.68rem, 2.3cqi, 0.8rem);
+    font-size: calc(clamp(0.68rem, 2.3cqi, 0.8rem) * var(--w-font-scale, 1));
     font-weight: 650;
     font-variant-numeric: tabular-nums;
     color: var(--ink-secondary, #3b5448);
@@ -1144,7 +1144,7 @@
   }
   .upcoming-empty {
     margin: 0;
-    font-size: clamp(0.84rem, 2.8cqi, 0.96rem);
+    font-size: calc(clamp(0.84rem, 2.8cqi, 0.96rem) * var(--w-font-scale, 1));
     font-weight: 500;
   }
   @container (max-width: 220px) {
@@ -1199,12 +1199,12 @@
     padding: 0.18rem 0.55rem;
     border-radius: 9999px;
     background: rgba(255, 255, 255, 0.11);
-    font-size: 0.72rem;
+    font-size: calc(0.72rem * var(--w-font-scale, 1));
     font-weight: 650;
     letter-spacing: 0.02em;
   }
   .footer-zone {
-    font-size: 0.74rem;
+    font-size: calc(0.74rem * var(--w-font-scale, 1));
     opacity: 0.78;
   }
   @container (max-width: 300px) {

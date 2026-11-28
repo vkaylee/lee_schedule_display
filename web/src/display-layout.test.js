@@ -1,4 +1,5 @@
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { blockKey, canvasScale, contrastRatio, defaultDisplayLayout, gridCell, hasInvalidRoomAssignment, moveBlock, resizeEdges, validDisplayLayout } from './display-layout.js';
 
 assert.equal(canvasScale(1080, 1920, 810, 700, 'width'), 0.75);
@@ -64,3 +65,9 @@ assert.equal(validDisplayLayout([{ ...roomA, id: '' }]), false);
 assert.equal(contrastRatio('#000000', '#ffffff') > 20, true);
 assert.equal(contrastRatio('#777777', '#888888') < 2, true);
 assert.equal(contrastRatio('bad', '#ffffff'), null);
+
+// ponytail: checks explicit widget typography rules; use browser tests for computed layout and clipping.
+const canvas = readFileSync(new URL('./DisplayCanvas.svelte', import.meta.url), 'utf8');
+for (const selector of ['clock-zone', 'widget-eyebrow', 'room-eyebrow', 'status-pill', 'status-remaining', 'status-note', 'kicker', 'upcoming-count', 'upcoming-sep', 'upcoming-relative', 'upcoming-duration', 'upcoming-empty', 'footer-row', 'footer-badge', 'footer-zone']) {
+  assert.match(canvas, new RegExp(`\\.${selector}\\s*\\{[^}]*font-size:\\s*calc\\([^;]*var\\(--w-font-scale, 1\\)`), `${selector} must scale`);
+}
